@@ -21,11 +21,15 @@ interface AIAnalysisSummaryProps {
 }
 
 export function AIAnalysisSummary({ summary, indicators, threatIntel }: AIAnalysisSummaryProps) {
-  const severityColors = {
+  const safeIndicators = indicators ?? [];
+  const safeThreatIntel = threatIntel ?? [];
+
+  const severityColors: Record<string, string> = {
     high: 'bg-red-600/20 text-red-400 border-red-600/50',
     medium: 'bg-orange-600/20 text-orange-400 border-orange-600/50',
     low: 'bg-yellow-600/20 text-yellow-400 border-yellow-600/50'
   };
+  const defaultColor = 'bg-slate-600/20 text-slate-400 border-slate-600/50';
 
   return (
     <div className="space-y-4">
@@ -45,8 +49,11 @@ export function AIAnalysisSummary({ summary, indicators, threatIntel }: AIAnalys
           <h3 className="text-lg text-white">Key Risk Indicators</h3>
         </div>
         <div className="space-y-3">
-          {indicators.map((indicator, index) => (
-            <div 
+          {safeIndicators.length === 0 && (
+            <p className="text-slate-400 text-sm">No specific indicators detected.</p>
+          )}
+          {safeIndicators.map((indicator, index) => (
+            <div
               key={index}
               className="flex items-start gap-3 p-3 bg-slate-800/50 rounded-lg border border-slate-700"
             >
@@ -59,9 +66,9 @@ export function AIAnalysisSummary({ summary, indicators, threatIntel }: AIAnalys
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-white font-medium">{indicator.type}</span>
-                  <Badge 
-                    variant="outline" 
-                    className={`text-xs ${severityColors[indicator.severity]} border`}
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${severityColors[indicator.severity] ?? defaultColor} border`}
                   >
                     {indicator.severity}
                   </Badge>
@@ -79,8 +86,11 @@ export function AIAnalysisSummary({ summary, indicators, threatIntel }: AIAnalys
           <h3 className="text-lg text-white">Threat Intelligence Integration</h3>
         </div>
         <div className="space-y-3">
-          {threatIntel.map((intel, index) => (
-            <div 
+          {safeThreatIntel.length === 0 && (
+            <p className="text-slate-400 text-sm">No external threat intelligence data available for this analysis.</p>
+          )}
+          {safeThreatIntel.map((intel, index) => (
+            <div
               key={index}
               className="p-4 bg-slate-800/50 rounded-lg border border-slate-700"
             >

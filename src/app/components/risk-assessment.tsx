@@ -3,14 +3,14 @@ import { Card } from './ui/card';
 import { Badge } from './ui/badge';
 
 interface RiskAssessmentProps {
-  verdict: 'phishing' | 'suspicious' | 'benign';
+  verdict: string;
   riskScore: number;
   confidence: number;
-  severity: 'critical' | 'high' | 'medium' | 'low';
+  severity: string;
 }
 
 export function RiskAssessment({ verdict, riskScore, confidence, severity }: RiskAssessmentProps) {
-  const verdictConfig = {
+  const verdictConfig: Record<string, any> = {
     phishing: {
       label: 'PHISHING DETECTED',
       icon: ShieldAlert,
@@ -29,6 +29,15 @@ export function RiskAssessment({ verdict, riskScore, confidence, severity }: Ris
       textColor: 'text-orange-400',
       glowColor: 'shadow-orange-900/50'
     },
+    clean: {
+      label: 'CLEAN',
+      icon: ShieldCheck,
+      bgColor: 'bg-green-950/50',
+      borderColor: 'border-green-900',
+      iconColor: 'text-green-500',
+      textColor: 'text-green-400',
+      glowColor: 'shadow-green-900/50'
+    },
     benign: {
       label: 'BENIGN',
       icon: ShieldCheck,
@@ -40,14 +49,17 @@ export function RiskAssessment({ verdict, riskScore, confidence, severity }: Ris
     }
   };
 
-  const severityConfig = {
+  const severityConfig: Record<string, any> = {
     critical: { label: 'Critical', color: 'bg-red-600', textColor: 'text-red-400' },
     high: { label: 'High', color: 'bg-orange-600', textColor: 'text-orange-400' },
     medium: { label: 'Medium', color: 'bg-yellow-600', textColor: 'text-yellow-400' },
     low: { label: 'Low', color: 'bg-blue-600', textColor: 'text-blue-400' }
   };
 
-  const config = verdictConfig[verdict];
+  const normalizedVerdict = (verdict || 'clean').toLowerCase();
+  const normalizedSeverity = (severity || 'low').toLowerCase();
+  const config = verdictConfig[normalizedVerdict] ?? verdictConfig['clean'];
+  const sevCfg = severityConfig[normalizedSeverity] ?? severityConfig['low'];
   const VerdictIcon = config.icon;
 
   return (
@@ -67,8 +79,8 @@ export function RiskAssessment({ verdict, riskScore, confidence, severity }: Ris
             </p>
           </div>
         </div>
-        <Badge variant="outline" className={`${severityConfig[severity].color} text-white border-0`}>
-          {severityConfig[severity].label} Severity
+        <Badge variant="outline" className={`${sevCfg.color} text-white border-0`}>
+          {sevCfg.label} Severity
         </Badge>
       </div>
 
@@ -107,24 +119,24 @@ export function RiskAssessment({ verdict, riskScore, confidence, severity }: Ris
           <div className="flex items-center gap-2 mt-1">
             <div className="flex gap-1">
               {[1, 2, 3, 4, 5].map((level) => {
-                const filled = 
-                  (severity === 'critical' && level <= 5) ||
-                  (severity === 'high' && level <= 4) ||
-                  (severity === 'medium' && level <= 3) ||
-                  (severity === 'low' && level <= 2);
-                
+                const filled =
+                  (normalizedSeverity === 'critical' && level <= 5) ||
+                  (normalizedSeverity === 'high' && level <= 4) ||
+                  (normalizedSeverity === 'medium' && level <= 3) ||
+                  (normalizedSeverity === 'low' && level <= 2);
+
                 return (
                   <div
                     key={level}
                     className={`w-3 h-8 rounded ${
-                      filled ? severityConfig[severity].color : 'bg-slate-800'
+                      filled ? sevCfg.color : 'bg-slate-800'
                     }`}
                   />
                 );
               })}
             </div>
           </div>
-          <div className={`mt-2 text-sm ${severityConfig[severity].textColor}`}>
+          <div className={`mt-2 text-sm ${sevCfg.textColor}`}>
             Immediate action required
           </div>
         </div>

@@ -1,0 +1,65 @@
+From: "PayPal Security" <security@paypa1-verify.com>
+To: victim@example.com
+Subject: Urgent: Your PayPal account has been limited - Action Required
+Date: Mon, 04 May 2026 02:15:42 -0800
+Message-ID: <abc123.phishing@paypa1-verify.com>
+Reply-To: noreply@suspicious-redirect.net
+Return-Path: <bounce@suspicious-domain.net>
+MIME-Version: 1.0
+Authentication-Results: mx.example.com;
+  spf=fail (domain of paypa1-verify.com does not designate 209.85.220.41 as permitted sender) smtp.mailfrom=security@paypa1-verify.com;
+  dkim=fail reason="signature verification failed";
+  dmarc=fail (p=REJECT) action=none header.from=paypa1-verify.com
+Received: from mail.paypa1-verify.com (209.85.220.41) by mx.example.com
+  with SMTP id abc123; Mon, 04 May 2026 02:16:01 -0800
+Content-Type: multipart/mixed; boundary="----=_Part_123_456.789"
+
+------=_Part_123_456.789
+Content-Type: text/plain; charset=UTF-8
+
+Dear Valued Customer,
+
+We have detected unusual activity on your PayPal account. Your account has been temporarily limited.
+
+Action Required Immediately:
+
+Please click the link below to verify your information and restore your account within 24 hours or your account will be permanently suspended.
+
+VERIFY YOUR ACCOUNT: http://paypa1-verify.com/secure/login?token=abc123
+
+This is an automated security alert. Please do not reply to this email.
+
+Thank you for your immediate attention.
+
+PayPal Security Team
+
+------=_Part_123_456.789
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px;">
+    <img src="http://paypa1-verify.com/assets/logo.png" alt="PayPal" style="height: 40px;" />
+    <h2 style="color: #003087;">Your account has been limited</h2>
+    <p>Dear Valued Customer,</p>
+    <p>We have detected <strong>unusual activity</strong> on your PayPal account. Your account has been <span style="color:red; font-weight:bold;">temporarily limited</span>.</p>
+    <p><strong>Action Required Immediately:</strong></p>
+    <p>
+      Please click the button below to verify your information and restore your account within <strong>24 hours</strong> or your account will be <em>permanently suspended</em>.
+    </p>
+    <a href="http://paypa1-verify.com/secure/login?token=abc123"
+       style="display:inline-block; background:#003087; color:white; padding:12px 24px; border-radius:4px; text-decoration:none; font-weight:bold;">
+      Verify Your Account Now
+    </a>
+    <br><br>
+    <p style="font-size: 12px; color: #666;">
+      Tracking: <img src="http://tracking-pixel.suspicious-domain.net/track?uid=victim@example.com&campaign=paypal_phish_001" width="1" height="1" />
+    </p>
+    <p>If you believe this is an error, visit <a href="http://paypa1-verify.com/help">www.paypal.com/help</a> for assistance.</p>
+    <p style="font-size: 12px; color: #999;">PayPal, Inc. | 2211 North First Street | San Jose, CA 95131</p>
+  </div>
+</body>
+</html>
+
+------=_Part_123_456.789--

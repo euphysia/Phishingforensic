@@ -5,9 +5,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collap
 import { useState } from 'react';
 
 interface HeaderAnalysis {
-  spfStatus: 'pass' | 'fail' | 'neutral';
-  dkimStatus: 'pass' | 'fail' | 'neutral';
-  dmarcStatus: 'pass' | 'fail' | 'neutral';
+  spfStatus: string;
+  dkimStatus: string;
+  dmarcStatus: string;
   senderReputation: number;
   spoofingIndicators: string[];
   returnPath: string;
@@ -20,7 +20,7 @@ interface URLAnalysis {
   suspiciousUrls: number;
   urls: Array<{
     url: string;
-    status: 'malicious' | 'suspicious' | 'safe';
+    status: string;
     reputation: number;
     category: string;
   }>;
@@ -34,7 +34,7 @@ interface AttachmentAnalysis {
     type: string;
     size: string;
     hash: string;
-    status: 'malicious' | 'suspicious' | 'safe';
+    status: string;
     sandboxResult?: string;
   }>;
 }
@@ -46,6 +46,11 @@ interface AnalysisModulesProps {
 }
 
 export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysis }: AnalysisModulesProps) {
+  // Safe defaults to prevent crashes if data arrives partially
+  const hdr = headerAnalysis ?? { spfStatus: 'none', dkimStatus: 'none', dmarcStatus: 'none', senderReputation: 0, spoofingIndicators: [], returnPath: '', receivedFrom: '' };
+  const urlA = urlAnalysis ?? { totalUrls: 0, maliciousUrls: 0, suspiciousUrls: 0, urls: [] };
+  const attA = attachmentAnalysis ?? { totalAttachments: 0, riskyAttachments: 0, attachments: [] };
+
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     headers: true,
     urls: true,
@@ -59,18 +64,26 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
     }));
   };
 
-  const StatusBadge = ({ status }: { status: 'pass' | 'fail' | 'neutral' | 'malicious' | 'suspicious' | 'safe' }) => {
-    const config = {
+  const StatusBadge = ({ status }: { status: string }) => {
+    const config: Record<string, { label: string; color: string; icon: any }> = {
       pass: { label: 'Pass', color: 'bg-green-600/20 text-green-400 border-green-600/50', icon: CheckCircle2 },
       fail: { label: 'Fail', color: 'bg-red-600/20 text-red-400 border-red-600/50', icon: XCircle },
+      softfail: { label: 'Soft Fail', color: 'bg-orange-600/20 text-orange-400 border-orange-600/50', icon: AlertTriangle },
       neutral: { label: 'Neutral', color: 'bg-slate-600/20 text-slate-400 border-slate-600/50', icon: AlertTriangle },
+      none: { label: 'None', color: 'bg-slate-600/20 text-slate-400 border-slate-600/50', icon: AlertTriangle },
+      unknown: { label: 'Unknown', color: 'bg-slate-600/20 text-slate-400 border-slate-600/50', icon: AlertTriangle },
+      temperror: { label: 'Temp Error', color: 'bg-orange-600/20 text-orange-400 border-orange-600/50', icon: AlertTriangle },
+      permerror: { label: 'Perm Error', color: 'bg-red-600/20 text-red-400 border-red-600/50', icon: XCircle },
       malicious: { label: 'Malicious', color: 'bg-red-600/20 text-red-400 border-red-600/50', icon: XCircle },
       suspicious: { label: 'Suspicious', color: 'bg-orange-600/20 text-orange-400 border-orange-600/50', icon: AlertTriangle },
-      safe: { label: 'Safe', color: 'bg-green-600/20 text-green-400 border-green-600/50', icon: CheckCircle2 }
+      safe: { label: 'Safe', color: 'bg-green-600/20 text-green-400 border-green-600/50', icon: CheckCircle2 },
     };
 
-    const { label, color, icon: Icon } = config[status];
-    
+    // Normalize: treat any non-pass result that isn't explicitly mapped as 'unknown'
+    const normalizedStatus = (status || 'unknown').toLowerCase();
+    const cfg = config[normalizedStatus] ?? config['unknown'];
+    const { label, color, icon: Icon } = cfg;
+
     return (
       <Badge variant="outline" className={`${color} border text-xs`}>
         <Icon className="w-3 h-3 mr-1" />
@@ -103,15 +116,15 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
               <div className="grid grid-cols-3 gap-4">
                 <div className="p-4 bg-slate-800/50 rounded-lg">
                   <div className="text-sm text-slate-400 mb-2">SPF Record</div>
-                  <StatusBadge status={headerAnalysis.spfStatus} />
+                  <StatusBadge status={hdr.spfStatus} />
                 </div>
                 <div className="p-4 bg-slate-800/50 rounded-lg">
                   <div className="text-sm text-slate-400 mb-2">DKIM Signature</div>
-                  <StatusBadge status={headerAnalysis.dkimStatus} />
+                  <StatusBadge status={hdr.dkimStatus} />
                 </div>
                 <div className="p-4 bg-slate-800/50 rounded-lg">
                   <div className="text-sm text-slate-400 mb-2">DMARC Policy</div>
-                  <StatusBadge status={headerAnalysis.dmarcStatus} />
+                  <StatusBadge status={hdr.dmarcStatus} />
                 </div>
               </div>
 
@@ -119,26 +132,26 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
                 <div className="text-sm text-slate-400 mb-2">Sender Reputation Score</div>
                 <div className="flex items-center gap-3">
                   <div className="flex-1 bg-slate-700 rounded-full h-2">
-                    <div 
+                    <div
                       className={`h-2 rounded-full ${
-                        headerAnalysis.senderReputation >= 70 ? 'bg-green-500' :
-                        headerAnalysis.senderReputation >= 40 ? 'bg-orange-500' : 'bg-red-500'
+                        hdr.senderReputation >= 70 ? 'bg-green-500' :
+                        hdr.senderReputation >= 40 ? 'bg-orange-500' : 'bg-red-500'
                       }`}
-                      style={{ width: `${headerAnalysis.senderReputation}%` }}
+                      style={{ width: `${hdr.senderReputation}%` }}
                     />
                   </div>
-                  <span className="text-white font-medium">{headerAnalysis.senderReputation}/100</span>
+                  <span className="text-white font-medium">{hdr.senderReputation}/100</span>
                 </div>
               </div>
 
-              {headerAnalysis.spoofingIndicators.length > 0 && (
+              {(hdr.spoofingIndicators ?? []).length > 0 && (
                 <div className="p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
                   <div className="flex items-center gap-2 mb-3">
                     <AlertTriangle className="w-5 h-5 text-red-400" />
                     <span className="text-red-400 font-medium">Spoofing Indicators Detected</span>
                   </div>
                   <ul className="space-y-1 text-sm text-slate-300">
-                    {headerAnalysis.spoofingIndicators.map((indicator, index) => (
+                    {hdr.spoofingIndicators.map((indicator, index) => (
                       <li key={index} className="flex items-start gap-2">
                         <span className="text-red-400">•</span>
                         {indicator}
@@ -152,13 +165,13 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
                 <div>
                   <span className="text-slate-400">Return-Path:</span>
                   <code className="ml-2 text-slate-300 bg-slate-800 px-2 py-1 rounded">
-                    {headerAnalysis.returnPath}
+                    {hdr.returnPath || '—'}
                   </code>
                 </div>
                 <div>
                   <span className="text-slate-400">Received From:</span>
                   <code className="ml-2 text-slate-300 bg-slate-800 px-2 py-1 rounded">
-                    {headerAnalysis.receivedFrom}
+                    {hdr.receivedFrom || '—'}
                   </code>
                 </div>
               </div>
@@ -176,7 +189,7 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
               <div className="text-left">
                 <h3 className="text-lg text-white">URL Analysis & Scanning</h3>
                 <p className="text-sm text-slate-400">
-                  {urlAnalysis.totalUrls} URLs found • {urlAnalysis.maliciousUrls} malicious • {urlAnalysis.suspiciousUrls} suspicious
+                  {urlA.totalUrls} URLs found • {urlA.maliciousUrls} malicious • {urlA.suspiciousUrls} suspicious
                 </p>
               </div>
             </div>
@@ -188,21 +201,25 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="px-6 pb-6 space-y-3">
-              {urlAnalysis.urls.map((url, index) => (
-                <div key={index} className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <ExternalLink className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                      <code className="text-sm text-blue-400 truncate">{url.url}</code>
+              {(urlA.urls ?? []).length === 0 ? (
+                <p className="text-slate-400 text-sm py-4 text-center">No URLs detected in this email.</p>
+              ) : (
+                (urlA.urls ?? []).map((url, index) => (
+                  <div key={index} className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <ExternalLink className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                        <code className="text-sm text-blue-400 truncate">{url.url}</code>
+                      </div>
+                      <StatusBadge status={url.status ?? 'unknown'} />
                     </div>
-                    <StatusBadge status={url.status} />
+                    <div className="flex items-center gap-4 text-xs text-slate-400 ml-6">
+                      <span>Category: {url.category || 'Unknown'}</span>
+                      <span>Reputation: {url.reputation ?? '—'}/100</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-slate-400 ml-6">
-                    <span>Category: {url.category}</span>
-                    <span>Reputation: {url.reputation}/100</span>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -217,7 +234,7 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
               <div className="text-left">
                 <h3 className="text-lg text-white">Attachment Analysis</h3>
                 <p className="text-sm text-slate-400">
-                  {attachmentAnalysis.totalAttachments} attachments • {attachmentAnalysis.riskyAttachments} flagged as risky
+                  {attA.totalAttachments} attachments • {attA.riskyAttachments} flagged as risky
                 </p>
               </div>
             </div>
@@ -229,7 +246,10 @@ export function AnalysisModules({ headerAnalysis, urlAnalysis, attachmentAnalysi
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="px-6 pb-6 space-y-3">
-              {attachmentAnalysis.attachments.map((attachment, index) => (
+              {(attA.attachments ?? []).length === 0 ? (
+                <p className="text-slate-400 text-sm py-4 text-center">No attachments found in this email.</p>
+              ) : null}
+              {(attA.attachments ?? []).map((attachment, index) => (
                 <div key={index} className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">

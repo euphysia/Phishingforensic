@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Shield, Menu, X } from 'lucide-react';
 import { EmailSubmission } from './components/email-submission';
 import { ProcessingStatus } from './components/processing-status';
@@ -21,118 +21,18 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'executive' | 'analyst' | 'technical'>('analyst');
   const [activeTab, setActiveTab] = useState<'analysis' | 'history'>('analysis');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [analysisData, setAnalysisData] = useState<any>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [historyRefreshTrigger, setHistoryRefreshTrigger] = useState(0);
 
-  // Mock analysis data
-  const mockAnalysisData = {
-    verdict: 'phishing' as const,
-    riskScore: 94,
-    confidence: 96,
-    severity: 'critical' as const,
-    summary: "This email exhibits multiple high-confidence phishing indicators. The analysis detected domain spoofing attempting to impersonate PayPal using a lookalike domain (paypa1-verify.com with number '1' instead of letter 'l'). The sender failed all email authentication checks (SPF, DKIM, DMARC), and the embedded URLs redirect to a credential harvesting page. The message employs urgency-based social engineering tactics to pressure recipients into immediate action. This is a sophisticated phishing attack targeting financial credentials.",
-    indicators: [
-      {
-        type: 'Domain Spoofing',
-        description: 'Sender domain "paypa1-verify.com" uses homoglyph attack to mimic legitimate PayPal domain',
-        severity: 'high' as const
-      },
-      {
-        type: 'Failed Authentication',
-        description: 'Email failed SPF, DKIM, and DMARC validation checks',
-        severity: 'high' as const
-      },
-      {
-        type: 'Malicious URL',
-        description: 'Embedded link redirects to known phishing infrastructure',
-        severity: 'high' as const
-      },
-      {
-        type: 'Social Engineering',
-        description: 'Subject line uses urgency and fear tactics to manipulate recipient',
-        severity: 'medium' as const
-      },
-      {
-        type: 'Suspicious Timing',
-        description: 'Email sent during off-hours typical of automated phishing campaigns',
-        severity: 'low' as const
-      }
-    ],
-    threatIntel: [
-      {
-        source: 'VirusTotal',
-        finding: 'Domain flagged by 23/89 security vendors as malicious',
-        timestamp: '2 hours ago'
-      },
-      {
-        source: 'PhishTank',
-        finding: 'URL reported in active phishing campaign targeting financial services',
-        timestamp: '3 hours ago'
-      },
-      {
-        source: 'MISP Threat Sharing',
-        finding: 'Similar email pattern observed in 147 incidents across 23 organizations',
-        timestamp: '1 day ago'
-      }
-    ],
-    headerAnalysis: {
-      spfStatus: 'fail' as const,
-      dkimStatus: 'fail' as const,
-      dmarcStatus: 'fail' as const,
-      senderReputation: 15,
-      spoofingIndicators: [
-        'Return-Path domain does not match From domain',
-        'Display name impersonates legitimate organization',
-        'Sender IP address originates from known phishing infrastructure',
-        'Message-ID pattern matches automated phishing toolkit'
-      ],
-      returnPath: 'bounce@suspicious-domain.net',
-      receivedFrom: '209.85.220.41 (unknown)'
-    },
-    urlAnalysis: {
-      totalUrls: 3,
-      maliciousUrls: 2,
-      suspiciousUrls: 1,
-      urls: [
-        {
-          url: 'hxxp://paypa1-verify.com/secure/login',
-          status: 'malicious' as const,
-          reputation: 5,
-          category: 'Phishing/Credential Theft'
-        },
-        {
-          url: 'hxxp://paypa1-verify.com/assets/logo.png',
-          status: 'malicious' as const,
-          reputation: 5,
-          category: 'Phishing Infrastructure'
-        },
-        {
-          url: 'hxxp://tracking-pixel.suspicious-domain.net/track',
-          status: 'suspicious' as const,
-          reputation: 42,
-          category: 'Tracking/Analytics'
-        }
-      ]
-    },
-    attachmentAnalysis: {
-      totalAttachments: 1,
-      riskyAttachments: 0,
-      attachments: [
-        {
-          name: 'invoice.pdf',
-          type: 'PDF Document',
-          size: '245 KB',
-          hash: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
-          status: 'safe' as const,
-          sandboxResult: 'No malicious behavior detected during sandbox execution'
-        }
-      ]
-    }
-  };
 
-  const handleSubmit = (data: { type: string; content: string | File }) => {
+  const handleSubmit = async (data: { type: string; content: string | File }) => {
     setIsProcessing(true);
     setProgress(0);
     setShowResults(false);
-    
+    setAnalysisData(null);
+    setAnalysisError(null);
+
     const steps = [
       'Extracting email metadata',
       'Analyzing email headers',
@@ -143,33 +43,87 @@ export default function App() {
       'Finalizing analysis report'
     ];
 
-    let currentStepIndex = 0;
-    const interval = setInterval(() => {
-      setProgress(prev => {
-        const newProgress = prev + 2;
-        if (newProgress >= 100) {
-          clearInterval(interval);
-          setIsProcessing(false);
-          setShowResults(true);
-          return 100;
-        }
-        
-        const stepIndex = Math.floor((newProgress / 100) * steps.length);
-        if (stepIndex !== currentStepIndex && stepIndex < steps.length) {
-          currentStepIndex = stepIndex;
-          setCurrentStep(steps[stepIndex]);
-        }
-        
-        return newProgress;
+    // Animate progress while API call runs in background
+    let stepIdx = 0;
+    let fakeProgress = 0;
+    setCurrentStep(steps[0]);
+
+    const progressInterval = setInterval(() => {
+      fakeProgress = Math.min(fakeProgress + 1.2, 90); // Cap at 90% until real result
+      setProgress(fakeProgress);
+      const newStep = Math.floor((fakeProgress / 90) * (steps.length - 1));
+      if (newStep !== stepIdx && newStep < steps.length) {
+        stepIdx = newStep;
+        setCurrentStep(steps[newStep]);
+      }
+    }, 200);
+
+    try {
+      let body: FormData | string;
+      let headers: Record<string, string> = {};
+
+      if (data.type === 'file' && data.content instanceof File) {
+        const fd = new FormData();
+        fd.append('email', data.content);
+        body = fd;
+        // Don't set Content-Type — browser sets it with boundary
+      } else {
+        body = JSON.stringify({ rawEmail: data.content as string });
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers,
+        body,
       });
-    }, 100);
+
+      clearInterval(progressInterval);
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ message: 'Unknown error' }));
+        throw new Error(errData.error || errData.message || `HTTP ${res.status}`);
+      }
+
+      const result = await res.json();
+      setAnalysisData(result);
+      setCurrentStep('Analysis complete');
+      setProgress(100);
+
+      // Trigger history refresh
+      setHistoryRefreshTrigger(t => t + 1);
+
+      setTimeout(() => {
+        setIsProcessing(false);
+        setShowResults(true);
+      }, 400);
+
+    } catch (err: any) {
+      clearInterval(progressInterval);
+      console.error('Analysis failed:', err);
+      setAnalysisError(err.message);
+      setCurrentStep('Failed');
+      setProgress(0);
+      setIsProcessing(false);
+      // Don't show results — show the error banner only
+    }
   };
 
-  const handleSelectAnalysis = (id: string) => {
-    setShowResults(true);
+  const handleSelectAnalysis = async (id: string) => {
     setActiveTab('analysis');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      const res = await fetch(`/api/history/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnalysisData(data);
+        setShowResults(true);
+      }
+    } catch {
+      setShowResults(true);
+    }
   };
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
@@ -216,14 +170,14 @@ export default function App() {
       <main className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="space-y-6">
           <TabsList className="bg-slate-900 border border-slate-800 p-1">
-            <TabsTrigger 
-              value="analysis" 
+            <TabsTrigger
+              value="analysis"
               className="data-[state=active]:bg-slate-700 data-[state=active]:text-white px-8 text-[rgb(255,255,255)]"
             >
               New Analysis
             </TabsTrigger>
-            <TabsTrigger 
-              value="history" 
+            <TabsTrigger
+              value="history"
               className="data-[state=active]:bg-slate-700 data-[state=active]:text-white px-8 text-[rgb(255,255,255)]"
             >
               History
@@ -235,98 +189,123 @@ export default function App() {
             <EmailSubmission onSubmit={handleSubmit} isProcessing={isProcessing} />
 
             {/* Processing Status */}
-            <ProcessingStatus 
-              isProcessing={isProcessing} 
+            <ProcessingStatus
+              isProcessing={isProcessing}
               progress={progress}
               currentStep={currentStep}
             />
 
-            {/* Analysis Results */}
-            {showResults && (
-              <div className="space-y-6">
-                {/* Risk Assessment */}
-                <RiskAssessment
-                  verdict={mockAnalysisData.verdict}
-                  riskScore={mockAnalysisData.riskScore}
-                  confidence={mockAnalysisData.confidence}
-                  severity={mockAnalysisData.severity}
-                />
-
-                {/* Layered View Toggle */}
-                <LayeredViewToggle 
-                  currentView={currentView}
-                  onViewChange={setCurrentView}
-                />
-
-                {/* Executive View */}
-                {currentView === 'executive' && (
-                  <div className="space-y-6">
-                    <AIAnalysisSummary
-                      summary={mockAnalysisData.summary}
-                      indicators={mockAnalysisData.indicators.slice(0, 3)}
-                      threatIntel={mockAnalysisData.threatIntel.slice(0, 1)}
-                    />
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <RecommendedActions riskLevel={mockAnalysisData.severity} />
-                      <ForensicReport
-                        reportId="RPT-2026-002547"
-                        generatedAt="Feb 8, 2026 08:42 PST"
-                        analysisTime="16 seconds"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Analyst View */}
-                {currentView === 'analyst' && (
-                  <div className="space-y-6">
-                    <AIAnalysisSummary
-                      summary={mockAnalysisData.summary}
-                      indicators={mockAnalysisData.indicators}
-                      threatIntel={mockAnalysisData.threatIntel}
-                    />
-                    <AnalysisModules
-                      headerAnalysis={mockAnalysisData.headerAnalysis}
-                      urlAnalysis={mockAnalysisData.urlAnalysis}
-                      attachmentAnalysis={mockAnalysisData.attachmentAnalysis}
-                    />
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      <RecommendedActions riskLevel={mockAnalysisData.severity} />
-                      <ForensicReport
-                        reportId="RPT-2026-002547"
-                        generatedAt="Feb 8, 2026 08:42 PST"
-                        analysisTime="16 seconds"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Technical View */}
-                {currentView === 'technical' && (
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 space-y-6">
-                      <TechnicalDetails />
-                    </div>
-                    <div className="space-y-6">
-                      <AnalysisModules
-                        headerAnalysis={mockAnalysisData.headerAnalysis}
-                        urlAnalysis={mockAnalysisData.urlAnalysis}
-                        attachmentAnalysis={mockAnalysisData.attachmentAnalysis}
-                      />
-                      <ForensicReport
-                        reportId="RPT-2026-002547"
-                        generatedAt="Feb 8, 2026 08:42 PST"
-                        analysisTime="16 seconds"
-                      />
-                    </div>
-                  </div>
-                )}
+            {/* Analysis error state */}
+            {analysisError && !isProcessing && (
+              <div className="p-5 rounded-lg border border-red-700/50 bg-red-950/30 text-sm space-y-2">
+                <p className="text-red-400 font-semibold">⚠️ Analysis Failed</p>
+                <p className="text-slate-300">{analysisError}</p>
+                <p className="text-slate-400 text-xs">
+                  Make sure the backend is running: <code className="bg-slate-800 px-1 rounded">npm run dev:server</code>
+                </p>
               </div>
             )}
+
+            {/* Analysis Results — only shown when real data is available */}
+            {showResults && analysisData && (() => {
+              const d = analysisData;
+              const reportId = d.id ? d.id.slice(0, 12).toUpperCase() : '—';
+              const generatedAt = d.createdAt
+                ? new Date(d.createdAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+                : '—';
+              const analysisTimeSec = d.analysisTimeMs
+                ? `${(d.analysisTimeMs / 1000).toFixed(1)} seconds`
+                : '—';
+
+              return (
+                <div className="space-y-6">
+                  {/* Risk Assessment */}
+                  <RiskAssessment
+                    verdict={d.verdict}
+                    riskScore={d.riskScore}
+                    confidence={d.confidence}
+                    severity={d.severity}
+                  />
+
+                  {/* Layered View Toggle */}
+                  <LayeredViewToggle
+                    currentView={currentView}
+                    onViewChange={setCurrentView}
+                  />
+
+                  {/* Executive View */}
+                  {currentView === 'executive' && (
+                    <div className="space-y-6">
+                      <AIAnalysisSummary
+                        summary={d.summary}
+                        indicators={(d.indicators ?? []).slice(0, 3)}
+                        threatIntel={[]}
+                      />
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <RecommendedActions riskLevel={d.severity} />
+                        <ForensicReport
+                          reportId={reportId}
+                          generatedAt={generatedAt}
+                          analysisTime={analysisTimeSec}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Analyst View */}
+                  {currentView === 'analyst' && (
+                    <div className="space-y-6">
+                      <AIAnalysisSummary
+                        summary={d.summary}
+                        indicators={d.indicators ?? []}
+                        threatIntel={[]}
+                      />
+                      <AnalysisModules
+                        headerAnalysis={d.headerAnalysis}
+                        urlAnalysis={d.urlAnalysis}
+                        attachmentAnalysis={d.attachmentAnalysis}
+                      />
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <RecommendedActions riskLevel={d.severity} />
+                        <ForensicReport
+                          reportId={reportId}
+                          generatedAt={generatedAt}
+                          analysisTime={analysisTimeSec}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Technical View */}
+                  {currentView === 'technical' && (
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      <div className="lg:col-span-2 space-y-6">
+                        <TechnicalDetails />
+                      </div>
+                      <div className="space-y-6">
+                        <AnalysisModules
+                          headerAnalysis={d.headerAnalysis}
+                          urlAnalysis={d.urlAnalysis}
+                          attachmentAnalysis={d.attachmentAnalysis}
+                        />
+                        <ForensicReport
+                          reportId={reportId}
+                          generatedAt={generatedAt}
+                          analysisTime={analysisTimeSec}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </TabsContent>
 
           <TabsContent value="history" className="mt-6">
-            <AnalysisHistory onSelectAnalysis={handleSelectAnalysis} />
+            <AnalysisHistory
+              onSelectAnalysis={handleSelectAnalysis}
+              refreshTrigger={historyRefreshTrigger}
+            />
           </TabsContent>
         </Tabs>
       </main>
@@ -342,9 +321,9 @@ export default function App() {
             <div className="flex items-center gap-6">
               <span>© 2026 SecureForensics</span>
               <span>•</span>
-              <span>Analyzed 156,847 emails this month</span>
+              <span>Sprint 1 &amp; 2 Active</span>
               <span>•</span>
-              <span>98.7% accuracy rate</span>
+              <span>Real-time Analysis Enabled</span>
             </div>
           </div>
         </div>
@@ -352,3 +331,4 @@ export default function App() {
     </div>
   );
 }
+
