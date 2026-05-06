@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import db from '../db.js';
+import supabase from '../db.js';
 
 const CACHE_TTL_HOURS = 24;
 
@@ -9,16 +9,21 @@ const CACHE_TTL_HOURS = 24;
  * @param {string} source - 'virustotal' or 'urlscan'
  * @returns {object|null}
  */
-export function getCached(url, source) {
-  const hash = hashUrl(url);
-  const row = db.prepare(
-    `SELECT result FROM url_cache
-     WHERE url_hash = ? AND source = ? AND expires_at > datetime('now')`
-  ).get(`${hash}:${source}`);
+export async function getCached(url, source) {
+  const urlHash = hashUrl(url, source);
+  const now = new Date().toISOString();
 
-  if (!row) return null;
+  const { data, error } = await supabase
+    .from('url_cache')
+    .select('result')
+    .eq('url_hash', urlHash)
+    .gt('expires_at', now)
+    .single();
+
+  if (error || !data) return null;
+
   try {
-    return JSON.parse(row.result);
+    return typeof data.result === 'string' ? JSON.parse(data.result) : data.result;
   } catch {
     return null;
   }
@@ -30,19 +35,21 @@ export function getCached(url, source) {
  * @param {string} source
  * @param {object} result
  */
-export function setCached(url, source, result) {
-  const hash = hashUrl(url);
-  const expiresAt = new Date(Date.now() + CACHE_TTL_HOURS * 60 * 60 * 1000)
-    .toISOString()
-    .replace('T', ' ')
-    .substring(0, 19);
+export async function setCached(url, source, result) {
+  const urlHash = hashUrl(url, source);
+  const expiresAt = new Date(Date.now() + CACHE_TTL_HOURS * 60 * 60 * 1000).toISOString();
 
-  db.prepare(
-    `INSERT OR REPLACE INTO url_cache (url_hash, url, source, result, cached_at, expires_at)
-     VALUES (?, ?, ?, ?, datetime('now'), ?)`
-  ).run(`${hash}:${source}`, url, source, JSON.stringify(result), expiresAt);
+  await supabase.from('url_cache').upsert({
+    url_hash: urlHash,
+    url,
+    source,
+    result: JSON.stringify(result),
+    cached_at: new Date().toISOString(),
+    expires_at: expiresAt,
+  }, { onConflict: 'url_hash' });
 }
 
-function hashUrl(url) {
-  return crypto.createHash('sha256').update(url.trim().toLowerCase()).digest('hex').substring(0, 32);
+function hashUrl(url, source) {
+  const key = `${url.trim().toLowerCase()}:${source}`;
+  return crypto.createHash('sha256').update(key).digest('hex').substring(0, 32);
 }

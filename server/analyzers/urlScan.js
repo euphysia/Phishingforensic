@@ -11,7 +11,7 @@ const URLSCAN_BASE = 'https://urlscan.io/api/v1';
  */
 export async function scanWithURLScan(url) {
   // Check cache first
-  const cached = getCached(url, 'urlscan');
+  const cached = await getCached(url, 'urlscan');
   if (cached) return { ...cached, fromCache: true };
 
   const apiKey = process.env.URLSCAN_API_KEY;
@@ -38,8 +38,8 @@ export async function scanWithURLScan(url) {
     if (!uuid) throw new Error('No UUID from URLScan submission');
 
     // Poll for result (max 60s)
-    const result = await pollURLScan(uuid);
-    setCached(url, 'urlscan', result);
+    const result = await pollURLScan(uuid, url);
+    await setCached(url, 'urlscan', result);
     return result;
 
   } catch (err) {
@@ -48,7 +48,7 @@ export async function scanWithURLScan(url) {
   }
 }
 
-async function pollURLScan(uuid, maxAttempts = 10) {
+async function pollURLScan(uuid, url, maxAttempts = 10) {
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(6000);
     try {

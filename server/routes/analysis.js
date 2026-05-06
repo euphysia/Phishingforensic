@@ -1,6 +1,6 @@
 import express from 'express';
 import { v4 as uuid } from 'uuid';
-import db from '../db.js';
+import supabase from '../db.js';
 import { parseEmail } from '../parser/emailParser.js';
 import { analyzeHeaders } from '../parser/headerAnalyzer.js';
 import { extractUrls } from '../analyzers/urlExtractor.js';
@@ -8,6 +8,7 @@ import { scanWithVirusTotal } from '../analyzers/virusTotal.js';
 import { scanWithURLScan } from '../analyzers/urlScan.js';
 import { detectPhishingIndicators } from '../analyzers/phishingIndicators.js';
 import { scoreUrl, computeEmailRiskScore } from '../analyzers/reputationScorer.js';
+import { generateGeminiSummary, isGeminiEnabled } from '../analyzers/geminiSummary.js';
 
 const router = express.Router();
 
@@ -25,7 +26,6 @@ router.post('/', async (req, res) => {
     let rawEmail;
 
     if (req.file) {
-      // Uploaded .eml file
       rawEmail = req.file.buffer.toString('utf8');
     } else if (req.body?.rawEmail) {
       rawEmail = typeof req.body.rawEmail === 'string'
@@ -51,7 +51,6 @@ router.post('/', async (req, res) => {
     const extractedUrls = extractUrls(parsed.htmlBody, parsed.textBody);
 
     // ── 5. URL scanning (VirusTotal + URLScan) ──────────────────────────────
-    // Limit to first 5 unique URLs for speed
     const urlsToScan = extractedUrls.slice(0, 5);
     const urlScanResults = await Promise.allSettled(
       urlsToScan.map(async (eu) => {
@@ -63,9 +62,7 @@ router.post('/', async (req, res) => {
         const vt = vtResult.status === 'fulfilled' ? vtResult.value : null;
         const us = urlScanResult.status === 'fulfilled' ? urlScanResult.value : null;
 
-        // Phishing flags specific to this URL
         const urlFlags = detectPhishingIndicators([eu], parsed).filter(f => f.url === eu.url);
-
         const scored = scoreUrl(vt, us, eu, urlFlags);
 
         return {
@@ -91,7 +88,7 @@ router.post('/', async (req, res) => {
     // ── 6. Phishing indicators (full email scope) ───────────────────────────
     const allIndicators = [
       ...headerResult.indicators,
-      ...detectPhishingIndicators(extractedUrls, parsed).filter(f => !f.url), // body-level only
+      ...detectPhishingIndicators(extractedUrls, parsed).filter(f => !f.url),
     ];
 
     // ── 7. Attachment metadata ─────────────────────────────────────────────
@@ -100,7 +97,7 @@ router.post('/', async (req, res) => {
       contentType: att.contentType,
       sizeBytes: att.sizeBytes,
       sha256: att.sha256,
-      status: 'safe', // Full sandbox analysis is out of scope for Sprint 1-2
+      status: 'safe',
       sandboxResult: 'Static analysis only — dynamic sandbox not configured',
     }));
 
@@ -112,77 +109,104 @@ router.post('/', async (req, res) => {
     );
 
     // ── 9. Generate summary ─────────────────────────────────────────────────
-    const summary = generateSummary(verdict, riskScore, headerResult, scoredUrls, allIndicators, parsed);
+    const fallbackSummary = generateSummary(verdict, riskScore, headerResult, scoredUrls, allIndicators, parsed);
+    const summary = await generateGeminiSummary({
+      verdict,
+      riskScore,
+      confidence,
+      headerResult,
+      scoredUrls,
+      indicators: allIndicators,
+      parsed,
+      fallbackSummary,
+    });
 
-    // ── 10. Persist to SQLite ───────────────────────────────────────────────
+    console.log(`[Analysis] Summary via ${isGeminiEnabled() ? 'Gemini AI' : 'rule-based fallback'}`);
+
+    // ── 10. Persist to Supabase ─────────────────────────────────────────────
     const analysisId = uuid();
     const analysisTimeMs = Date.now() - startTime;
 
-    const insertAnalysis = db.prepare(`
-      INSERT INTO analyses (id, verdict, risk_score, confidence, severity, sha256, subject, sender, recipient, email_date, analysis_time_ms, summary)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertHeader = db.prepare(`
-      INSERT INTO email_headers (analysis_id, spf_status, dkim_status, dmarc_status, sender_reputation, return_path, received_from, message_id, reply_to, spoofing_indicators)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertUrl = db.prepare(`
-      INSERT INTO url_results (analysis_id, url, defanged_url, status, reputation, category, vt_detections, vt_total, urlscan_verdict, urlscan_uuid, phishing_flags)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertAttachment = db.prepare(`
-      INSERT INTO attachments (analysis_id, filename, content_type, size_bytes, sha256, status, sandbox_result)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertIndicator = db.prepare(`
-      INSERT INTO phishing_indicators (analysis_id, type, description, severity)
-      VALUES (?, ?, ?, ?)
-    `);
-
-    // Run all inserts in a transaction
-    const transaction = db.transaction(() => {
-      insertAnalysis.run(
-        analysisId, verdict, riskScore, confidence, severity,
-        parsed.sha256, parsed.subject, parsed.from, parsed.to,
-        parsed.date, analysisTimeMs, summary
-      );
-
-      insertHeader.run(
-        analysisId,
-        headerResult.spfStatus, headerResult.dkimStatus, headerResult.dmarcStatus,
-        headerResult.senderReputation,
-        headerResult.returnPath, headerResult.receivedFrom,
-        parsed.messageId, parsed.replyTo,
-        JSON.stringify(headerResult.spoofingIndicators)
-      );
-
-      for (const url of scoredUrls) {
-        insertUrl.run(
-          analysisId, url.url, url.defangedUrl, url.status,
-          url.score, url.category,
-          url.vtDetections, url.vtTotal,
-          url.urlScanVerdict, url.urlScanUuid,
-          JSON.stringify(url.phishingFlags)
-        );
-      }
-
-      for (const att of attachmentResults) {
-        insertAttachment.run(
-          analysisId, att.filename, att.contentType, att.sizeBytes,
-          att.sha256, att.status, att.sandboxResult
-        );
-      }
-
-      for (const ind of allIndicators) {
-        insertIndicator.run(analysisId, ind.type, ind.description, ind.severity);
-      }
+    // Insert main analysis row
+    const { error: analysisErr } = await supabase.from('analyses').insert({
+      id: analysisId,
+      verdict,
+      risk_score: riskScore,
+      confidence,
+      severity,
+      sha256: parsed.sha256,
+      subject: parsed.subject,
+      sender: parsed.from,
+      recipient: parsed.to,
+      email_date: parsed.date,
+      analysis_time_ms: analysisTimeMs,
+      summary,
     });
+    if (analysisErr) throw new Error(`DB insert (analyses): ${analysisErr.message}`);
 
-    transaction();
+    // Insert header row
+    const { error: headerErr } = await supabase.from('email_headers').insert({
+      analysis_id: analysisId,
+      spf_status: headerResult.spfStatus,
+      dkim_status: headerResult.dkimStatus,
+      dmarc_status: headerResult.dmarcStatus,
+      sender_reputation: headerResult.senderReputation,
+      return_path: headerResult.returnPath,
+      received_from: headerResult.receivedFrom,
+      message_id: parsed.messageId,
+      reply_to: parsed.replyTo,
+      spoofing_indicators: headerResult.spoofingIndicators,
+    });
+    if (headerErr) throw new Error(`DB insert (email_headers): ${headerErr.message}`);
+
+    // Insert URL rows
+    if (scoredUrls.length > 0) {
+      const { error: urlErr } = await supabase.from('url_results').insert(
+        scoredUrls.map(u => ({
+          analysis_id: analysisId,
+          url: u.url,
+          defanged_url: u.defangedUrl,
+          status: u.status,
+          reputation: u.score,
+          category: u.category,
+          vt_detections: u.vtDetections,
+          vt_total: u.vtTotal,
+          urlscan_verdict: u.urlScanVerdict,
+          urlscan_uuid: u.urlScanUuid,
+          phishing_flags: u.phishingFlags,
+        }))
+      );
+      if (urlErr) throw new Error(`DB insert (url_results): ${urlErr.message}`);
+    }
+
+    // Insert attachment rows
+    if (attachmentResults.length > 0) {
+      const { error: attErr } = await supabase.from('attachments').insert(
+        attachmentResults.map(a => ({
+          analysis_id: analysisId,
+          filename: a.filename,
+          content_type: a.contentType,
+          size_bytes: a.sizeBytes,
+          sha256: a.sha256,
+          status: a.status,
+          sandbox_result: a.sandboxResult,
+        }))
+      );
+      if (attErr) throw new Error(`DB insert (attachments): ${attErr.message}`);
+    }
+
+    // Insert phishing indicator rows
+    if (allIndicators.length > 0) {
+      const { error: indErr } = await supabase.from('phishing_indicators').insert(
+        allIndicators.map(ind => ({
+          analysis_id: analysisId,
+          type: ind.type,
+          description: ind.description,
+          severity: ind.severity,
+        }))
+      );
+      if (indErr) throw new Error(`DB insert (phishing_indicators): ${indErr.message}`);
+    }
 
     // ── 11. Build response ──────────────────────────────────────────────────
     const response = {

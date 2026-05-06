@@ -11,7 +11,7 @@ const VT_BASE = 'https://www.virustotal.com/api/v3';
  */
 export async function scanWithVirusTotal(url) {
   // Check cache first
-  const cached = getCached(url, 'virustotal');
+  const cached = await getCached(url, 'virustotal');
   if (cached) return { ...cached, fromCache: true };
 
   const apiKey = process.env.VIRUSTOTAL_API_KEY;
@@ -40,7 +40,7 @@ export async function scanWithVirusTotal(url) {
 
     // Step 2: Poll for result (max 30s)
     const result = await pollVTAnalysis(analysisId, apiKey);
-    setCached(url, 'virustotal', result);
+    await setCached(url, 'virustotal', result);
     return result;
 
   } catch (err) {

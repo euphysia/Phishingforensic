@@ -42,6 +42,7 @@ app.get('/api/health', (req, res) => {
     demoMode: {
       virusTotal: !process.env.VIRUSTOTAL_API_KEY || process.env.VIRUSTOTAL_API_KEY === 'YOUR_VIRUSTOTAL_API_KEY',
       urlScan: !process.env.URLSCAN_API_KEY || process.env.URLSCAN_API_KEY === 'YOUR_URLSCAN_API_KEY',
+      gemini: !process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'your-gemini-api-key-here',
     },
   });
 });
@@ -59,5 +60,6 @@ app.listen(PORT, () => {
   console.log(`\n🔬 Phishing Forensic API running at http://localhost:${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/api/health`);
   console.log(`   VirusTotal: ${process.env.VIRUSTOTAL_API_KEY ? '✅ API key set' : '⚠️  Demo mode'}`);
-  console.log(`   URLScan:    ${process.env.URLSCAN_API_KEY    ? '✅ API key set' : '⚠️  Demo mode'}\n`);
+  console.log(`   URLScan:    ${process.env.URLSCAN_API_KEY    ? '✅ API key set' : '⚠️  Demo mode'}`);
+  console.log(`   Gemini AI:  ${process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your-gemini-api-key-here' ? '✅ API key set' : '⚠️  Fallback summaries'}\n`);
 });

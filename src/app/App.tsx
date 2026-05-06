@@ -280,7 +280,12 @@ export default function App() {
                   {currentView === 'technical' && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       <div className="lg:col-span-2 space-y-6">
-                        <TechnicalDetails />
+                        <TechnicalDetails
+                          email={d.email}
+                          headerAnalysis={d.headerAnalysis}
+                          urlAnalysis={d.urlAnalysis}
+                          indicators={d.indicators ?? []}
+                        />
                       </div>
                       <div className="space-y-6">
                         <AnalysisModules

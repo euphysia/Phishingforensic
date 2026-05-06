@@ -1,5 +1,5 @@
 import express from 'express';
-import db from '../db.js';
+import supabase from '../db.js';
 
 const router = express.Router();
 
@@ -8,35 +8,22 @@ const router = express.Router();
  * Returns paginated list of past analyses, newest first.
  * Query params: ?page=1&limit=20
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const offset = (page - 1) * limit;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    const total = db.prepare('SELECT COUNT(*) as count FROM analyses').get().count;
+    const { data: rows, error, count } = await supabase
+      .from('analyses')
+      .select('id, created_at, verdict, risk_score, confidence, severity, sha256, subject, sender, recipient, email_date, analysis_time_ms, summary', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
-    const rows = db.prepare(`
-      SELECT
-        a.id,
-        a.created_at,
-        a.verdict,
-        a.risk_score,
-        a.confidence,
-        a.severity,
-        a.sha256,
-        a.subject,
-        a.sender,
-        a.recipient,
-        a.email_date,
-        a.analysis_time_ms,
-        a.summary
-      FROM analyses a
-      ORDER BY a.created_at DESC
-      LIMIT ? OFFSET ?
-    `).all(limit, offset);
+    if (error) throw new Error(error.message);
 
-    const analyses = rows.map(row => ({
+    const analyses = (rows || []).map(row => ({
       id: row.id,
       createdAt: row.created_at,
       verdict: row.verdict,
@@ -51,6 +38,8 @@ router.get('/', (req, res) => {
       analysisTimeMs: row.analysis_time_ms,
       summary: row.summary,
     }));
+
+    const total = count ?? 0;
 
     return res.json({
       analyses,
@@ -71,17 +60,47 @@ router.get('/', (req, res) => {
  * GET /api/history/:id
  * Returns full details for a single analysis.
  */
-router.get('/:id', (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const analysis = db.prepare('SELECT * FROM analyses WHERE id = ?').get(id);
-    if (!analysis) return res.status(404).json({ error: 'Analysis not found' });
+    const { data: analysis, error: aErr } = await supabase
+      .from('analyses')
+      .select('*')
+      .eq('id', id)
+      .single();
 
-    const headers = db.prepare('SELECT * FROM email_headers WHERE analysis_id = ?').get(id);
-    const urls = db.prepare('SELECT * FROM url_results WHERE analysis_id = ?').all(id);
-    const attachments = db.prepare('SELECT * FROM attachments WHERE analysis_id = ?').all(id);
-    const indicators = db.prepare('SELECT * FROM phishing_indicators WHERE analysis_id = ?').all(id);
+    if (aErr || !analysis) return res.status(404).json({ error: 'Analysis not found' });
+
+    const { data: headersRow } = await supabase
+      .from('email_headers')
+      .select('*')
+      .eq('analysis_id', id)
+      .single();
+
+    const { data: urls } = await supabase
+      .from('url_results')
+      .select('*')
+      .eq('analysis_id', id);
+
+    const { data: attachments } = await supabase
+      .from('attachments')
+      .select('*')
+      .eq('analysis_id', id);
+
+    const { data: indicators } = await supabase
+      .from('phishing_indicators')
+      .select('*')
+      .eq('analysis_id', id);
+
+    const urlList = urls || [];
+    const attList = attachments || [];
+    const indList = indicators || [];
+
+    // spoofing_indicators is stored as a jsonb array in Supabase
+    const spoofingIndicators = Array.isArray(headersRow?.spoofing_indicators)
+      ? headersRow.spoofing_indicators
+      : [];
 
     return res.json({
       id: analysis.id,
@@ -98,20 +117,20 @@ router.get('/:id', (req, res) => {
         date: analysis.email_date,
         sha256: analysis.sha256,
       },
-      headerAnalysis: headers ? {
-        spfStatus: headers.spf_status,
-        dkimStatus: headers.dkim_status,
-        dmarcStatus: headers.dmarc_status,
-        senderReputation: headers.sender_reputation,
-        returnPath: headers.return_path,
-        receivedFrom: headers.received_from,
-        spoofingIndicators: JSON.parse(headers.spoofing_indicators || '[]'),
+      headerAnalysis: headersRow ? {
+        spfStatus: headersRow.spf_status,
+        dkimStatus: headersRow.dkim_status,
+        dmarcStatus: headersRow.dmarc_status,
+        senderReputation: headersRow.sender_reputation,
+        returnPath: headersRow.return_path,
+        receivedFrom: headersRow.received_from,
+        spoofingIndicators,
       } : null,
       urlAnalysis: {
-        totalUrls: urls.length,
-        maliciousUrls: urls.filter(u => u.status === 'malicious').length,
-        suspiciousUrls: urls.filter(u => u.status === 'suspicious').length,
-        urls: urls.map(u => ({
+        totalUrls: urlList.length,
+        maliciousUrls: urlList.filter(u => u.status === 'malicious').length,
+        suspiciousUrls: urlList.filter(u => u.status === 'suspicious').length,
+        urls: urlList.map(u => ({
           url: u.defanged_url || u.url,
           status: u.status,
           reputation: u.reputation,
@@ -121,9 +140,9 @@ router.get('/:id', (req, res) => {
         })),
       },
       attachmentAnalysis: {
-        totalAttachments: attachments.length,
-        riskyAttachments: attachments.filter(a => a.status !== 'safe').length,
-        attachments: attachments.map(a => ({
+        totalAttachments: attList.length,
+        riskyAttachments: attList.filter(a => a.status !== 'safe').length,
+        attachments: attList.map(a => ({
           name: a.filename,
           type: a.content_type,
           size: formatSize(a.size_bytes),
@@ -132,7 +151,7 @@ router.get('/:id', (req, res) => {
           sandboxResult: a.sandbox_result,
         })),
       },
-      indicators: indicators.map(i => ({
+      indicators: indList.map(i => ({
         type: i.type,
         description: i.description,
         severity: i.severity,
