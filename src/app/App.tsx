@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Shield, Menu, X } from 'lucide-react';
+import { LandingPage } from './components/landing-page';
 import { EmailSubmission } from './components/email-submission';
 import { ProcessingStatus } from './components/processing-status';
 import { RiskAssessment } from './components/risk-assessment';
@@ -14,6 +15,7 @@ import { Button } from './components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState('');
@@ -125,6 +127,10 @@ export default function App() {
   };
 
 
+  if (showLanding) {
+    return <LandingPage onGetStarted={() => setShowLanding(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header */}
@@ -146,6 +152,12 @@ export default function App() {
               </div>
             </div>
             <div className="hidden md:flex items-center gap-4">
+              <button
+                onClick={() => setShowLanding(true)}
+                className="text-sm text-slate-400 hover:text-white transition-colors"
+              >
+                Home
+              </button>
               <div className="text-right text-sm">
                 <div className="text-slate-400">System Status</div>
                 <div className="flex items-center gap-2 text-green-400">
@@ -321,12 +333,12 @@ export default function App() {
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-400">
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4" />
-              <span>Phishing Forensic Analysis System v2.5.1</span>
+              <span>PhishForensics — Automated Phishing Email Forensic Analysis System</span>
             </div>
             <div className="flex items-center gap-6">
-              <span>© 2026 SecureForensics</span>
+              <button onClick={() => setShowLanding(true)} className="hover:text-white transition-colors">Home</button>
               <span>•</span>
-              <span>Sprint 1 &amp; 2 Active</span>
+              <span>Sprints 1–4 Active</span>
               <span>•</span>
               <span>Real-time Analysis Enabled</span>
             </div>

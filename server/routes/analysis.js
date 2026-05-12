@@ -10,6 +10,14 @@ import { detectPhishingIndicators } from '../analyzers/phishingIndicators.js';
 import { scoreUrl, computeEmailRiskScore } from '../analyzers/reputationScorer.js';
 import { generateGeminiSummary, isGeminiEnabled } from '../analyzers/geminiSummary.js';
 
+// ── Sprint 3: Attachment Analysis + Chain-of-Custody ─────────────────────────
+import { analyzeAttachments } from '../analyzers/attachmentAnalyzer.js';
+import { createChainOfCustody, mergeAttachmentAuditTrails } from '../analyzers/chainOfCustody.js';
+
+// ── Sprint 4: Threat Intelligence (AbuseIPDB + PhishTank) ────────────────────
+import { checkIpReputation, extractSenderIps } from '../analyzers/abuseIPDB.js';
+import { checkWithPhishTank } from '../analyzers/phishTank.js';
+
 const router = express.Router();
 
 /**
@@ -44,39 +52,81 @@ router.post('/', async (req, res) => {
     // ── 2. Parse email (MIME + SHA-256) ────────────────────────────────────
     const parsed = await parseEmail(rawEmail);
 
-    // ── 3. Header analysis ──────────────────────────────────────────────────
+    // ── 3. Chain-of-Custody: initialise forensic audit trail ───────────────
+    const analysisId  = uuid();
+    const custody     = createChainOfCustody(
+      analysisId,
+      parsed.sha256,
+      parsed.subject || '(no subject)',
+      parsed.from    || '(unknown)'
+    );
+
+    // ── 4. Header analysis ──────────────────────────────────────────────────
     const headerResult = analyzeHeaders(parsed);
+    custody.addEntry('HEADER_ANALYSIS', 'HeaderAnalyzer',
+      `SPF: ${headerResult.spfStatus}, DKIM: ${headerResult.dkimStatus}, DMARC: ${headerResult.dmarcStatus}`);
 
-    // ── 4. URL extraction ───────────────────────────────────────────────────
+    // ── 5. URL extraction ───────────────────────────────────────────────────
     const extractedUrls = extractUrls(parsed.htmlBody, parsed.textBody);
+    custody.addEntry('URL_EXTRACTION', 'URLExtractor',
+      `Extracted ${extractedUrls.length} URL(s) from email body`);
 
-    // ── 5. URL scanning (VirusTotal + URLScan) ──────────────────────────────
+    // ── 6. Sprint 4: AbuseIPDB — Sender IP reputation ──────────────────────
+    const senderIps     = extractSenderIps(parsed.receivedHeaders);
+    const ipRepResults  = await Promise.allSettled(
+      senderIps.map(ip => checkIpReputation(ip))
+    );
+    const ipReputations = ipRepResults
+      .filter(r => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    for (const ipResult of ipReputations) {
+      custody.addEntry('IP_REPUTATION_CHECK', 'AbuseIPDB',
+        ipResult.summary || `IP ${ipResult.ip} checked`,
+        null);
+      if (ipResult.verdict === 'malicious' || ipResult.verdict === 'suspicious') {
+        headerResult.indicators = headerResult.indicators || [];
+        headerResult.indicators.push({
+          type:        'MALICIOUS_SENDER_IP',
+          severity:    ipResult.verdict === 'malicious' ? 'high' : 'medium',
+          description: `Sender IP ${ipResult.ip} has abuse score ${ipResult.abuseScore}% — ${ipResult.summary}`,
+        });
+      }
+    }
+
+    // ── 7. URL scanning (VirusTotal + URLScan + PhishTank) ──────────────────
     const urlsToScan = extractedUrls.slice(0, 5);
     const urlScanResults = await Promise.allSettled(
       urlsToScan.map(async (eu) => {
-        const [vtResult, urlScanResult] = await Promise.allSettled([
+        const [vtResult, urlScanResult, phishTankResult] = await Promise.allSettled([
           scanWithVirusTotal(eu.url),
           scanWithURLScan(eu.url),
+          checkWithPhishTank(eu.url),   // Sprint 4: PhishTank
         ]);
 
-        const vt = vtResult.status === 'fulfilled' ? vtResult.value : null;
+        const vt = vtResult.status      === 'fulfilled' ? vtResult.value      : null;
         const us = urlScanResult.status === 'fulfilled' ? urlScanResult.value : null;
+        const pt = phishTankResult.status === 'fulfilled' ? phishTankResult.value : null;
 
         const urlFlags = detectPhishingIndicators([eu], parsed).filter(f => f.url === eu.url);
-        const scored = scoreUrl(vt, us, eu, urlFlags);
+        const scored   = scoreUrl(vt, us, eu, urlFlags, pt);  // Sprint 4: pass PhishTank
+
+        custody.addEntry('URL_SCAN', 'URLScanner',
+          `${eu.defangedUrl || eu.url} — score: ${scored.score}, status: ${scored.status}`);
 
         return {
-          url: eu.url,
-          defangedUrl: eu.defangedUrl,
-          domain: eu.domain,
-          status: scored.status,
-          score: scored.score,
-          category: scored.category,
-          vtDetections: vt?.detections || 0,
-          vtTotal: vt?.total || 0,
-          urlScanVerdict: us?.verdict || null,
-          urlScanUuid: us?.uuid || null,
-          phishingFlags: urlFlags,
+          url:              eu.url,
+          defangedUrl:      eu.defangedUrl,
+          domain:           eu.domain,
+          status:           scored.status,
+          score:            scored.score,
+          category:         scored.category,
+          vtDetections:     vt?.detections || 0,
+          vtTotal:          vt?.total || 0,
+          urlScanVerdict:   us?.verdict || null,
+          urlScanUuid:      us?.uuid || null,
+          phishTankResult:  pt,                    // Sprint 4
+          phishingFlags:    urlFlags,
         };
       })
     );
@@ -85,31 +135,40 @@ router.post('/', async (req, res) => {
       .filter(r => r.status === 'fulfilled')
       .map(r => r.value);
 
-    // ── 6. Phishing indicators (full email scope) ───────────────────────────
+    // ── 8. Phishing indicators (full email scope) ───────────────────────────
     const allIndicators = [
       ...headerResult.indicators,
       ...detectPhishingIndicators(extractedUrls, parsed).filter(f => !f.url),
     ];
 
-    // ── 7. Attachment metadata ─────────────────────────────────────────────
-    const attachmentResults = (parsed.attachments || []).map(att => ({
-      filename: att.filename,
-      contentType: att.contentType,
-      sizeBytes: att.sizeBytes,
-      sha256: att.sha256,
-      status: 'safe',
-      sandboxResult: 'Static analysis only — dynamic sandbox not configured',
-    }));
+    // ── 9. Sprint 3: Attachment deep analysis + audit trail ────────────────
+    const attachmentResults = await analyzeAttachments(
+      parsed.attachments || [],
+      analysisId
+    );
+    mergeAttachmentAuditTrails(custody, attachmentResults);
 
-    // ── 8. Overall risk score ───────────────────────────────────────────────
-    const { riskScore, confidence, verdict, severity } = computeEmailRiskScore(
+    custody.addEntry('ATTACHMENT_ANALYSIS', 'AttachmentAnalyzer',
+      `${attachmentResults.length} attachment(s) analysed. ` +
+      `Malicious: ${attachmentResults.filter(a => a.status === 'malicious').length}, ` +
+      `Suspicious: ${attachmentResults.filter(a => a.status === 'suspicious').length}`);
+
+    // ── 10. Sprint 4: Unified risk score (all 5 signal sources) ────────────
+    const { riskScore, confidence, verdict, severity, scoreBreakdown } = computeEmailRiskScore(
       headerResult,
       scoredUrls.map(u => ({ score: u.score })),
-      allIndicators
+      allIndicators,
+      ipReputations,        // Sprint 4: AbuseIPDB
+      attachmentResults     // Sprint 3: Attachment risks
     );
 
-    // ── 9. Generate summary ─────────────────────────────────────────────────
-    const fallbackSummary = generateSummary(verdict, riskScore, headerResult, scoredUrls, allIndicators, parsed);
+    custody.addEntry('RISK_SCORE_COMPUTED', 'ReputationScorer',
+      `Final risk score: ${riskScore}/100, verdict: ${verdict}, severity: ${severity}`);
+    custody.addEntry('ANALYSIS_FINALISED', 'AnalysisEngine',
+      `Forensic analysis complete. Chain-of-custody entries: ${custody.entries.length}`);
+
+    // ── 11. Generate AI summary ─────────────────────────────────────────────
+    const fallbackSummary = generateSummary(verdict, riskScore, headerResult, scoredUrls, allIndicators, parsed, attachmentResults, ipReputations);
     const summary = await generateGeminiSummary({
       verdict,
       riskScore,
@@ -119,12 +178,13 @@ router.post('/', async (req, res) => {
       indicators: allIndicators,
       parsed,
       fallbackSummary,
+      attachmentResults,  // Sprint 3
+      ipReputations,      // Sprint 4
     });
 
     console.log(`[Analysis] Summary via ${isGeminiEnabled() ? 'Gemini AI' : 'rule-based fallback'}`);
 
-    // ── 10. Persist to Supabase ─────────────────────────────────────────────
-    const analysisId = uuid();
+    // ── 12. Persist to Supabase ─────────────────────────────────────────────
     const analysisTimeMs = Date.now() - startTime;
 
     // Insert main analysis row
@@ -179,21 +239,80 @@ router.post('/', async (req, res) => {
       if (urlErr) throw new Error(`DB insert (url_results): ${urlErr.message}`);
     }
 
-    // Insert attachment rows
+    // Insert attachment rows (Sprint 3: extended schema)
     if (attachmentResults.length > 0) {
       const { error: attErr } = await supabase.from('attachments').insert(
         attachmentResults.map(a => ({
-          analysis_id: analysisId,
-          filename: a.filename,
-          content_type: a.contentType,
-          size_bytes: a.sizeBytes,
-          sha256: a.sha256,
-          status: a.status,
-          sandbox_result: a.sandboxResult,
+          analysis_id:    analysisId,
+          filename:       a.filename,
+          content_type:   a.contentType,
+          size_bytes:     a.sizeBytes,
+          sha256:         a.sha256,
+          md5:            a.md5,
+          status:         a.status,
+          risks:          a.risks || [],
+          vt_detections:  a.vtResult?.detections || 0,
+          vt_total:       a.vtResult?.total || 0,
+          metadata:       a.metadata || {},
+          audit_trail:    a.auditTrail || [],
+          sandbox_result: a.vtResult
+            ? `VirusTotal: ${a.vtResult.detections}/${a.vtResult.total} detections${a.vtResult.malwareFamily ? ` — ${a.vtResult.malwareFamily}` : ''}`
+            : 'Static analysis only',
         }))
       );
-      if (attErr) throw new Error(`DB insert (attachments): ${attErr.message}`);
+      if (attErr) {
+        // Gracefully degrade if new columns don't exist yet (schema migration pending)
+        console.warn(`[Analysis] Attachment insert warning: ${attErr.message}`);
+        // Retry with minimal columns for backwards compatibility
+        const { error: attErrFallback } = await supabase.from('attachments').insert(
+          attachmentResults.map(a => ({
+            analysis_id:   analysisId,
+            filename:      a.filename,
+            content_type:  a.contentType,
+            size_bytes:    a.sizeBytes,
+            sha256:        a.sha256,
+            status:        a.status,
+            sandbox_result: `Static analysis — ${a.risks?.length || 0} risk(s) found`,
+          }))
+        );
+        if (attErrFallback) throw new Error(`DB insert (attachments): ${attErrFallback.message}`);
+      }
     }
+
+    // Insert IP reputation rows (Sprint 4)
+    if (ipReputations.length > 0) {
+      const { error: ipErr } = await supabase.from('ip_reputations').insert(
+        ipReputations.map(r => ({
+          analysis_id:    analysisId,
+          ip:             r.ip,
+          abuse_score:    r.abuseScore || 0,
+          verdict:        r.verdict || 'unknown',
+          total_reports:  r.totalReports || 0,
+          country_code:   r.countryCode || null,
+          isp:            r.isp || null,
+          is_tor:         r.isTor || false,
+          categories:     r.categories || [],
+          summary:        r.summary || null,
+          from_cache:     r.fromCache || false,
+        }))
+      ).catch(err => {
+        console.warn('[Analysis] ip_reputations table may not exist yet:', err.message);
+        return { error: null }; // Non-fatal — table added in schema migration
+      });
+    }
+
+    // Persist chain-of-custody (Sprint 3)
+    const custodySummary = custody.getSummary();
+    await supabase.from('chain_of_custody').insert({
+      analysis_id:   analysisId,
+      email_sha256:  parsed.sha256,
+      total_entries: custodySummary.totalEntries,
+      chain_intact:  custodySummary.chainIntact,
+      entries:       custodySummary.entries,
+      created_at:    custodySummary.startTime,
+    }).then(({ error }) => {
+      if (error) console.warn('[Analysis] chain_of_custody table may not exist yet:', error.message);
+    });
 
     // Insert phishing indicator rows
     if (allIndicators.length > 0) {
@@ -249,16 +368,48 @@ router.post('/', async (req, res) => {
         })),
       },
       attachmentAnalysis: {
-        totalAttachments: attachmentResults.length,
-        riskyAttachments: attachmentResults.filter(a => a.status !== 'safe').length,
+        totalAttachments:  attachmentResults.length,
+        riskyAttachments:  attachmentResults.filter(a => a.status !== 'safe').length,
+        maliciousAttachments: attachmentResults.filter(a => a.status === 'malicious').length,
         attachments: attachmentResults.map(a => ({
-          name: a.filename,
-          type: a.contentType,
-          size: formatSize(a.sizeBytes),
-          hash: a.sha256,
-          status: a.status,
-          sandboxResult: a.sandboxResult,
+          name:          a.filename,
+          type:          a.contentType,
+          size:          formatSize(a.sizeBytes),
+          hash:          a.sha256,
+          md5:           a.md5,
+          status:        a.status,
+          risks:         a.risks || [],
+          vtDetections:  a.vtResult?.detections || 0,
+          vtTotal:       a.vtResult?.total || 0,
+          metadata:      a.metadata || {},
         })),
+      },
+      // Sprint 4: IP reputation data
+      ipReputation: {
+        totalIpsChecked: ipReputations.length,
+        maliciousIps:    ipReputations.filter(r => r.verdict === 'malicious').length,
+        suspiciousIps:   ipReputations.filter(r => r.verdict === 'suspicious').length,
+        ips: ipReputations.map(r => ({
+          ip:           r.ip,
+          abuseScore:   r.abuseScore,
+          verdict:      r.verdict,
+          totalReports: r.totalReports,
+          countryCode:  r.countryCode,
+          isp:          r.isp,
+          isTor:        r.isTor,
+          categories:   r.categories,
+          summary:      r.summary,
+        })),
+      },
+      // Sprint 4: Score breakdown per source
+      scoreBreakdown,
+      // Sprint 3: Chain-of-custody summary
+      chainOfCustody: {
+        totalEntries: custody.entries.length,
+        chainIntact:  custody.verifyChain(),
+        startTime:    custody.entries[0]?.timestamp,
+        endTime:      custody.entries[custody.entries.length - 1]?.timestamp,
+        entries:      custody.entries,
       },
       indicators: allIndicators.map(({ type, description, severity }) => ({ type, description, severity })),
     };
@@ -276,22 +427,28 @@ router.post('/', async (req, res) => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function generateSummary(verdict, riskScore, headerResult, urls, indicators, parsed) {
-  const subject = parsed.subject || '(no subject)';
-  const from = parsed.from || '(unknown sender)';
-  const highIndicators = indicators.filter(i => i.severity === 'high');
-  const malUrls = urls.filter(u => u.status === 'malicious').length;
+function generateSummary(verdict, riskScore, headerResult, urls, indicators, parsed, attachmentResults = [], ipReputations = []) {
+  const subject      = parsed.subject || '(no subject)';
+  const from         = parsed.from    || '(unknown sender)';
+  const highIndicators  = indicators.filter(i => i.severity === 'high');
+  const malUrls         = urls.filter(u => u.status === 'malicious').length;
+  const malAttachments  = attachmentResults.filter(a => a.status === 'malicious').length;
+  const malIps          = ipReputations.filter(r => r.verdict === 'malicious').length;
 
   if (verdict === 'phishing') {
     return `This email exhibits high-confidence phishing indicators (risk score: ${riskScore}/100). ` +
       `Received from "${from}" with subject "${subject}". ` +
-      (headerResult.spfStatus !== 'pass' ? `The sender failed email authentication checks (SPF: ${headerResult.spfStatus}, DKIM: ${headerResult.dkimStatus}, DMARC: ${headerResult.dmarcStatus}). ` : '') +
-      (malUrls > 0 ? `${malUrls} malicious URL${malUrls > 1 ? 's' : ''} detected in the email body. ` : '') +
+      (headerResult.spfStatus !== 'pass' ? `Sender failed authentication (SPF: ${headerResult.spfStatus}, DKIM: ${headerResult.dkimStatus}, DMARC: ${headerResult.dmarcStatus}). ` : '') +
+      (malUrls > 0 ? `${malUrls} malicious URL${malUrls > 1 ? 's' : ''} detected. ` : '') +
+      (malAttachments > 0 ? `${malAttachments} malicious attachment${malAttachments > 1 ? 's' : ''} found. ` : '') +
+      (malIps > 0 ? `${malIps} sender IP${malIps > 1 ? 's' : ''} flagged by AbuseIPDB. ` : '') +
       (highIndicators.length > 0 ? `Key threats: ${highIndicators.slice(0, 2).map(i => i.type).join(', ')}.` : '');
   } else if (verdict === 'suspicious') {
-    return `This email contains suspicious elements that warrant further review (risk score: ${riskScore}/100). ` +
+    return `This email contains suspicious elements warranting further review (risk score: ${riskScore}/100). ` +
       `From "${from}", subject "${subject}". ` +
-      `${indicators.length} indicator${indicators.length !== 1 ? 's' : ''} flagged. Treat with caution.`;
+      `${indicators.length} indicator${indicators.length !== 1 ? 's' : ''} flagged.` +
+      (attachmentResults.filter(a => a.status !== 'safe').length > 0 ? ' Suspicious attachments detected.' : '') +
+      ' Treat with caution.';
   } else {
     return `This email appears clean with no significant phishing indicators detected (risk score: ${riskScore}/100). ` +
       `From "${from}", subject "${subject}". Standard security practices still recommended.`;
