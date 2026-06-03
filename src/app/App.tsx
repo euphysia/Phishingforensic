@@ -213,7 +213,7 @@ export default function App() {
                 <p className="text-red-400 font-semibold">⚠️ Analysis Failed</p>
                 <p className="text-slate-300">{analysisError}</p>
                 <p className="text-slate-400 text-xs">
-                  Make sure the backend is running: <code className="bg-slate-800 px-1 rounded">npm run dev:server</code>
+                  Check the backend terminal for details. Both servers start with: <code className="bg-slate-800 px-1 rounded">npm run dev</code>
                 </p>
               </div>
             )}

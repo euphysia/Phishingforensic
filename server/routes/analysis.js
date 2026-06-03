@@ -9,6 +9,7 @@ import { scanWithURLScan } from '../analyzers/urlScan.js';
 import { detectPhishingIndicators } from '../analyzers/phishingIndicators.js';
 import { scoreUrl, computeEmailRiskScore } from '../analyzers/reputationScorer.js';
 import { generateGeminiSummary, isGeminiEnabled } from '../analyzers/geminiSummary.js';
+import { analyzeEmailBody } from '../analyzers/bodyAnalyzer.js';
 
 // ── Sprint 3: Attachment Analysis + Chain-of-Custody ─────────────────────────
 import { analyzeAttachments } from '../analyzers/attachmentAnalyzer.js';
@@ -70,6 +71,16 @@ router.post('/', async (req, res) => {
     const extractedUrls = extractUrls(parsed.htmlBody, parsed.textBody);
     custody.addEntry('URL_EXTRACTION', 'URLExtractor',
       `Extracted ${extractedUrls.length} URL(s) from email body`);
+
+    // ── 5b. AI Body Analysis ─────────────────────────────────────────────────
+    const bodyAnalysis = await analyzeEmailBody({
+      textBody: parsed.textBody,
+      htmlBody:  parsed.htmlBody,
+      subject:   parsed.subject,
+      from:      parsed.from,
+    });
+    custody.addEntry('BODY_ANALYSIS', 'BodyAnalyzer',
+      `Body risk: ${bodyAnalysis.bodyRiskScore}/100, threat: ${bodyAnalysis.overallThreatLevel}, tactics: ${bodyAnalysis.tactics.length} (source: ${bodyAnalysis.source})`);
 
     // ── 6. Sprint 4: AbuseIPDB — Sender IP reputation ──────────────────────
     const senderIps     = extractSenderIps(parsed.receivedHeaders);
@@ -135,10 +146,18 @@ router.post('/', async (req, res) => {
       .filter(r => r.status === 'fulfilled')
       .map(r => r.value);
 
-    // ── 8. Phishing indicators (full email scope) ───────────────────────────
+    // ── 8. Phishing indicators (full email scope, including AI body tactics) ─
+    const bodyTacticIndicators = bodyAnalysis.tactics.map(t => ({
+      type:        t.type,
+      description: t.description || t.evidence || t.type,
+      severity:    t.severity,
+      source:      'body-ai',
+    }));
+
     const allIndicators = [
       ...headerResult.indicators,
       ...detectPhishingIndicators(extractedUrls, parsed).filter(f => !f.url),
+      ...bodyTacticIndicators,
     ];
 
     // ── 9. Sprint 3: Attachment deep analysis + audit trail ────────────────
@@ -180,6 +199,7 @@ router.post('/', async (req, res) => {
       fallbackSummary,
       attachmentResults,  // Sprint 3
       ipReputations,      // Sprint 4
+      bodyAnalysis,       // AI body analysis
     });
 
     console.log(`[Analysis] Summary via ${isGeminiEnabled() ? 'Gemini AI' : 'rule-based fallback'}`);
@@ -281,24 +301,25 @@ router.post('/', async (req, res) => {
 
     // Insert IP reputation rows (Sprint 4)
     if (ipReputations.length > 0) {
-      const { error: ipErr } = await supabase.from('ip_reputations').insert(
-        ipReputations.map(r => ({
-          analysis_id:    analysisId,
-          ip:             r.ip,
-          abuse_score:    r.abuseScore || 0,
-          verdict:        r.verdict || 'unknown',
-          total_reports:  r.totalReports || 0,
-          country_code:   r.countryCode || null,
-          isp:            r.isp || null,
-          is_tor:         r.isTor || false,
-          categories:     r.categories || [],
-          summary:        r.summary || null,
-          from_cache:     r.fromCache || false,
-        }))
-      ).catch(err => {
-        console.warn('[Analysis] ip_reputations table may not exist yet:', err.message);
-        return { error: null }; // Non-fatal — table added in schema migration
-      });
+      try {
+        await supabase.from('ip_reputations').insert(
+          ipReputations.map(r => ({
+            analysis_id:    analysisId,
+            ip:             r.ip,
+            abuse_score:    r.abuseScore || 0,
+            verdict:        r.verdict || 'unknown',
+            total_reports:  r.totalReports || 0,
+            country_code:   r.countryCode || null,
+            isp:            r.isp || null,
+            is_tor:         r.isTor || false,
+            categories:     r.categories || [],
+            summary:        r.summary || null,
+            from_cache:     r.fromCache || false,
+          }))
+        );
+      } catch (ipInsertErr) {
+        console.warn('[Analysis] ip_reputations table may not exist yet:', ipInsertErr.message);
+      }
     }
 
     // Persist chain-of-custody (Sprint 3)
@@ -403,6 +424,15 @@ router.post('/', async (req, res) => {
       },
       // Sprint 4: Score breakdown per source
       scoreBreakdown,
+      // AI body analysis
+      bodyAnalysis: {
+        bodyRiskScore:     bodyAnalysis.bodyRiskScore,
+        overallThreatLevel: bodyAnalysis.overallThreatLevel,
+        confidence:        bodyAnalysis.confidence,
+        tactics:           bodyAnalysis.tactics,
+        summary:           bodyAnalysis.summary,
+        source:            bodyAnalysis.source,
+      },
       // Sprint 3: Chain-of-custody summary
       chainOfCustody: {
         totalEntries: custody.entries.length,
@@ -417,10 +447,11 @@ router.post('/', async (req, res) => {
     return res.json(response);
 
   } catch (err) {
-    console.error('[Analysis] Error:', err);
+    console.error('[Analysis] FATAL ERROR:', err.message);
+    console.error(err.stack);
     return res.status(500).json({
-      error: 'Analysis failed',
-      message: err.message,
+      error: err.message || 'Analysis failed',
+      message: err.message || 'An unexpected error occurred during analysis.',
     });
   }
 });
