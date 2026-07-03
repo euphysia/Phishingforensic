@@ -8,7 +8,8 @@ import { scanWithVirusTotal } from '../analyzers/virusTotal.js';
 import { scanWithURLScan } from '../analyzers/urlScan.js';
 import { detectPhishingIndicators } from '../analyzers/phishingIndicators.js';
 import { scoreUrl, computeEmailRiskScore } from '../analyzers/reputationScorer.js';
-import { generateGeminiSummary, isGeminiEnabled } from '../analyzers/geminiSummary.js';
+import { generateAISummary, isAIEnabled } from '../analyzers/aiSummary.js';
+import { generateRecommendations } from '../analyzers/recommendationGenerator.js';
 import { analyzeEmailBody } from '../analyzers/bodyAnalyzer.js';
 
 // ── Sprint 3: Attachment Analysis + Chain-of-Custody ─────────────────────────
@@ -18,6 +19,8 @@ import { createChainOfCustody, mergeAttachmentAuditTrails } from '../analyzers/c
 // ── Sprint 4: Threat Intelligence (AbuseIPDB + PhishTank) ────────────────────
 import { checkIpReputation, extractSenderIps } from '../analyzers/abuseIPDB.js';
 import { checkWithPhishTank } from '../analyzers/phishTank.js';
+import { checkDomainAge } from '../analyzers/domainAge.js';
+import { optionalAuth, checkGuestLimit, incrementGuestTrial } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -27,7 +30,7 @@ const router = express.Router();
  *       OR application/json with body { rawEmail: "..." }
  *       OR text/plain raw email body
  */
-router.post('/', async (req, res) => {
+router.post('/', optionalAuth, checkGuestLimit, async (req, res) => {
   const startTime = Date.now();
 
   try {
@@ -52,6 +55,164 @@ router.post('/', async (req, res) => {
 
     // ── 2. Parse email (MIME + SHA-256) ────────────────────────────────────
     const parsed = await parseEmail(rawEmail);
+
+    // ── 2a. Cache check — return existing result if same email seen before ──
+    if (parsed.sha256) {
+      const { data: cached } = await supabase
+        .from('analyses')
+        .select('id')
+        .eq('sha256', parsed.sha256)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (cached?.id) {
+        console.log(`[Analysis] Cache hit for sha256 ${parsed.sha256.slice(0, 16)}… → cloning from ${cached.id}`);
+
+        // Fetch original data
+        const { data: src }        = await supabase.from('analyses').select('*').eq('id', cached.id).single();
+
+        // recommendations may be stored as a JSON string (text column) or already parsed (jsonb)
+        const parseRecs = (raw) => {
+          if (Array.isArray(raw)) return raw;
+          if (typeof raw === 'string') { try { return JSON.parse(raw); } catch {} }
+          return [];
+        };
+        const { data: headersRow } = await supabase.from('email_headers').select('*').eq('analysis_id', cached.id).single();
+        const { data: urls }       = await supabase.from('url_results').select('*').eq('analysis_id', cached.id);
+        const { data: attachments }= await supabase.from('attachments').select('*').eq('analysis_id', cached.id);
+        const { data: indicators } = await supabase.from('phishing_indicators').select('*').eq('analysis_id', cached.id);
+        const { data: ipReps }     = await supabase.from('ip_reputations').select('*').eq('analysis_id', cached.id);
+        const { data: custodyRows }= await supabase.from('chain_of_custody').select('*').eq('analysis_id', cached.id);
+
+        // Create a new history entry for this user/session
+        const newId = uuid();
+        await supabase.from('analyses').insert({
+          id:               newId,
+          verdict:          src.verdict,
+          risk_score:       src.risk_score,
+          confidence:       src.confidence,
+          severity:         src.severity,
+          sha256:           src.sha256,
+          subject:          src.subject,
+          sender:           src.sender,
+          recipient:        src.recipient,
+          email_date:       src.email_date,
+          analysis_time_ms: src.analysis_time_ms,
+          summary:          src.summary,
+          recommendations:  parseRecs(src.recommendations),
+          submitted_by:     req.user?.id ?? null,
+        });
+
+        // Clone related rows under the new ID
+        if (headersRow) {
+          await supabase.from('email_headers').insert({ ...headersRow, id: undefined, analysis_id: newId });
+        }
+        if ((urls ?? []).length > 0) {
+          await supabase.from('url_results').insert(urls.map(r => ({ ...r, id: undefined, analysis_id: newId })));
+        }
+        if ((attachments ?? []).length > 0) {
+          try { await supabase.from('attachments').insert(attachments.map(r => ({ ...r, id: undefined, analysis_id: newId }))); } catch {}
+        }
+        if ((indicators ?? []).length > 0) {
+          await supabase.from('phishing_indicators').insert(indicators.map(r => ({ ...r, id: undefined, analysis_id: newId })));
+        }
+        if ((ipReps ?? []).length > 0) {
+          try { await supabase.from('ip_reputations').insert(ipReps.map(r => ({ ...r, id: undefined, analysis_id: newId }))); } catch {}
+        }
+        if (custodyRows?.[0]) {
+          await supabase.from('chain_of_custody').insert({ ...custodyRows[0], id: undefined, analysis_id: newId });
+        }
+
+        const urlList = urls  || [];
+        const attList = attachments || [];
+        const indList = indicators  || [];
+        const ipList  = ipReps      || [];
+        const spoofingIndicators = Array.isArray(headersRow?.spoofing_indicators) ? headersRow.spoofing_indicators : [];
+
+        const cachedResponse = {
+          cached:        true,
+          analysisId:    newId,
+          createdAt:     new Date().toISOString(),
+          analysisTimeMs: src.analysis_time_ms,
+          verdict:       src.verdict,
+          riskScore:     src.risk_score,
+          confidence:    src.confidence,
+          severity:      src.severity,
+          summary:       src.summary,
+          email: {
+            subject:   src.subject,
+            from:      src.sender,
+            to:        src.recipient,
+            date:      src.email_date,
+            sha256:    src.sha256,
+          },
+          headerAnalysis: headersRow ? {
+            spfStatus:          headersRow.spf_status,
+            dkimStatus:         headersRow.dkim_status,
+            dmarcStatus:        headersRow.dmarc_status,
+            senderReputation:   headersRow.sender_reputation,
+            returnPath:         headersRow.return_path,
+            receivedFrom:       headersRow.received_from,
+            spoofingIndicators,
+          } : null,
+          urlAnalysis: {
+            totalUrls:      urlList.length,
+            maliciousUrls:  urlList.filter(u => u.status === 'malicious').length,
+            suspiciousUrls: urlList.filter(u => u.status === 'suspicious').length,
+            urls: urlList.map(u => ({
+              url:          u.defanged_url || u.url,
+              status:       u.status,
+              reputation:   u.reputation,
+              category:     u.category,
+              vtDetections: u.vt_detections,
+              vtTotal:      u.vt_total,
+            })),
+          },
+          attachmentAnalysis: {
+            totalAttachments:    attList.length,
+            riskyAttachments:    attList.filter(a => a.status !== 'safe').length,
+            maliciousAttachments:attList.filter(a => a.status === 'malicious').length,
+            attachments: attList.map(a => ({
+              name:         a.filename,
+              type:         a.content_type,
+              size:         a.size_bytes,
+              hash:         a.sha256,
+              status:       a.status,
+              risks:        a.risks || [],
+              vtDetections: a.vt_detections || 0,
+              vtTotal:      a.vt_total || 0,
+            })),
+          },
+          ipReputation: {
+            totalIpsChecked: ipList.length,
+            maliciousIps:    ipList.filter(r => r.verdict === 'malicious').length,
+            suspiciousIps:   ipList.filter(r => r.verdict === 'suspicious').length,
+            ips: ipList.map(r => ({
+              ip:           r.ip,
+              abuseScore:   r.abuse_score,
+              verdict:      r.verdict,
+              totalReports: r.total_reports,
+              countryCode:  r.country_code,
+              isp:          r.isp,
+              isTor:        r.is_tor,
+            })),
+          },
+          indicators:    indList.map(i => ({ type: i.type, description: i.description, severity: i.severity })),
+          recommendations: parseRecs(src.recommendations),
+          chainOfCustody: custodyRows?.[0] ? { entries: custodyRows[0].entries || [] } : null,
+        };
+
+        // Increment guest trial if applicable
+        if (!req.user && req.trial !== undefined) {
+          const newCount = incrementGuestTrial(req, res);
+          cachedResponse.trialCount     = newCount;
+          cachedResponse.trialRemaining = Math.max(0, 3 - newCount);
+        }
+
+        return res.json(cachedResponse);
+      }
+    }
 
     // ── 3. Chain-of-Custody: initialise forensic audit trail ───────────────
     const analysisId  = uuid();
@@ -78,6 +239,8 @@ router.post('/', async (req, res) => {
       htmlBody:  parsed.htmlBody,
       subject:   parsed.subject,
       from:      parsed.from,
+      to:        parsed.to,
+      replyTo:   parsed.replyTo,
     });
     custody.addEntry('BODY_ANALYSIS', 'BodyAnalyzer',
       `Body risk: ${bodyAnalysis.bodyRiskScore}/100, threat: ${bodyAnalysis.overallThreatLevel}, tactics: ${bodyAnalysis.tactics.length} (source: ${bodyAnalysis.source})`);
@@ -109,18 +272,20 @@ router.post('/', async (req, res) => {
     const urlsToScan = extractedUrls.slice(0, 5);
     const urlScanResults = await Promise.allSettled(
       urlsToScan.map(async (eu) => {
-        const [vtResult, urlScanResult, phishTankResult] = await Promise.allSettled([
+        const [vtResult, urlScanResult, phishTankResult, domainAgeResult] = await Promise.allSettled([
           scanWithVirusTotal(eu.url),
           scanWithURLScan(eu.url),
-          checkWithPhishTank(eu.url),   // Sprint 4: PhishTank
+          checkWithPhishTank(eu.url),
+          checkDomainAge(eu.domain),
         ]);
 
-        const vt = vtResult.status      === 'fulfilled' ? vtResult.value      : null;
-        const us = urlScanResult.status === 'fulfilled' ? urlScanResult.value : null;
-        const pt = phishTankResult.status === 'fulfilled' ? phishTankResult.value : null;
+        const vt  = vtResult.status         === 'fulfilled' ? vtResult.value         : null;
+        const us  = urlScanResult.status    === 'fulfilled' ? urlScanResult.value    : null;
+        const pt  = phishTankResult.status  === 'fulfilled' ? phishTankResult.value  : null;
+        const da  = domainAgeResult.status  === 'fulfilled' ? domainAgeResult.value  : null;
 
         const urlFlags = detectPhishingIndicators([eu], parsed).filter(f => f.url === eu.url);
-        const scored   = scoreUrl(vt, us, eu, urlFlags, pt);  // Sprint 4: pass PhishTank
+        const scored   = scoreUrl(vt, us, eu, urlFlags, pt, da);
 
         custody.addEntry('URL_SCAN', 'URLScanner',
           `${eu.defangedUrl || eu.url} — score: ${scored.score}, status: ${scored.status}`);
@@ -136,7 +301,8 @@ router.post('/', async (req, res) => {
           vtTotal:          vt?.total || 0,
           urlScanVerdict:   us?.verdict || null,
           urlScanUuid:      us?.uuid || null,
-          phishTankResult:  pt,                    // Sprint 4
+          phishTankResult:  pt,
+          domainAge:        da,
           phishingFlags:    urlFlags,
         };
       })
@@ -177,8 +343,9 @@ router.post('/', async (req, res) => {
       headerResult,
       scoredUrls.map(u => ({ score: u.score })),
       allIndicators,
-      ipReputations,        // Sprint 4: AbuseIPDB
-      attachmentResults     // Sprint 3: Attachment risks
+      ipReputations,
+      attachmentResults,
+      bodyAnalysis          // direct AI body score — ensures summary & number agree
     );
 
     custody.addEntry('RISK_SCORE_COMPUTED', 'ReputationScorer',
@@ -188,7 +355,7 @@ router.post('/', async (req, res) => {
 
     // ── 11. Generate AI summary ─────────────────────────────────────────────
     const fallbackSummary = generateSummary(verdict, riskScore, headerResult, scoredUrls, allIndicators, parsed, attachmentResults, ipReputations);
-    const summary = await generateGeminiSummary({
+    const summary = await generateAISummary({
       verdict,
       riskScore,
       confidence,
@@ -202,7 +369,18 @@ router.post('/', async (req, res) => {
       bodyAnalysis,       // AI body analysis
     });
 
-    console.log(`[Analysis] Summary via ${isGeminiEnabled() ? 'Gemini AI' : 'rule-based fallback'}`);
+    console.log(`[Analysis] Summary via ${isAIEnabled() ? 'Groq AI' : 'rule-based fallback'}`);
+
+    // ── 12a. AI-powered contextual recommendations ──────────────────────────
+    const recommendations = await generateRecommendations({
+      verdict,
+      riskScore,
+      parsed,
+      indicators: allIndicators,
+      scoredUrls,
+      bodyAnalysis,
+      headerResult,
+    });
 
     // ── 12. Persist to Supabase ─────────────────────────────────────────────
     const analysisTimeMs = Date.now() - startTime;
@@ -221,6 +399,8 @@ router.post('/', async (req, res) => {
       email_date: parsed.date,
       analysis_time_ms: analysisTimeMs,
       summary,
+      recommendations,
+      submitted_by: req.user?.id ?? null,
     });
     if (analysisErr) throw new Error(`DB insert (analyses): ${analysisErr.message}`);
 
@@ -386,6 +566,7 @@ router.post('/', async (req, res) => {
           category: u.category,
           vtDetections: u.vtDetections,
           vtTotal: u.vtTotal,
+          domainAge: u.domainAge ?? null,
         })),
       },
       attachmentAnalysis: {
@@ -442,7 +623,15 @@ router.post('/', async (req, res) => {
         entries:      custody.entries,
       },
       indicators: allIndicators.map(({ type, description, severity }) => ({ type, description, severity })),
+      recommendations,
     };
+
+    // Increment guest trial cookie after successful analysis
+    if (!req.user && req.trial !== undefined) {
+      const newCount = incrementGuestTrial(req, res);
+      response.trialCount     = newCount;
+      response.trialRemaining = Math.max(0, 3 - newCount);
+    }
 
     return res.json(response);
 

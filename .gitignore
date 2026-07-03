@@ -26,3 +26,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Test emails (AI-generated samples for phishing detection testing)
+test-emails/

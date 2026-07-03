@@ -86,7 +86,11 @@ export function startSmtpListener(analysisPipeline) {
   server.on('error', (err) => {
     serverStatus = 'error';
     serverError  = err.message;
-    console.error('[SMTP] Fatal error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[SMTP] Port ${SMTP_PORT} already in use — SMTP forwarding unavailable. HTTP API is still running.`);
+    } else {
+      console.error('[SMTP] Fatal error:', err.message);
+    }
   });
 
   server.listen(SMTP_PORT, '0.0.0.0', () => {

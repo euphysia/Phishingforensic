@@ -1,11 +1,15 @@
 import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import multer from 'multer';
+import express      from 'express';
+import cors         from 'cors';
+import multer       from 'multer';
+import cookieParser from 'cookie-parser';
 import analysisRouter from './routes/analysis.js';
 import historyRouter  from './routes/history.js';
 import smtpRouter     from './routes/smtp.js';
+import authRouter     from './routes/auth.js';
+import auditRouter    from './routes/audit.js';
 import { startSmtpListener } from './smtp/smtpListener.js';
+import { COOKIE_SECRET } from './middleware/auth.js';
 
 // ── Import analysis pipeline for SMTP-triggered runs ─────────────────────────
 import { parseEmail }                    from './parser/emailParser.js';
@@ -15,7 +19,7 @@ import { scanWithVirusTotal }            from './analyzers/virusTotal.js';
 import { scanWithURLScan }               from './analyzers/urlScan.js';
 import { detectPhishingIndicators }      from './analyzers/phishingIndicators.js';
 import { scoreUrl, computeEmailRiskScore } from './analyzers/reputationScorer.js';
-import { generateGeminiSummary }         from './analyzers/geminiSummary.js';
+import { generateAISummary }             from './analyzers/aiSummary.js';
 import { analyzeAttachments }            from './analyzers/attachmentAnalyzer.js';
 import { createChainOfCustody, mergeAttachmentAuditTrails } from './analyzers/chainOfCustody.js';
 import { checkIpReputation, extractSenderIps } from './analyzers/abuseIPDB.js';
@@ -28,9 +32,10 @@ const PORT = process.env.PORT || 3001;
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'] }));
+app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'], credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ type: 'message/rfc822', limit: '10mb' }));
+app.use(cookieParser(COOKIE_SECRET));
 
 // Multer for .eml file uploads (memory storage)
 const upload = multer({
@@ -49,8 +54,10 @@ const upload = multer({
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
+app.use('/api/auth',    authRouter);
 app.use('/api/analyze', upload.single('email'), analysisRouter);
 app.use('/api/history', historyRouter);
+app.use('/api/audit',   auditRouter);
 app.use('/api/smtp',    smtpRouter);
 
 // Health check
@@ -159,7 +166,7 @@ async function runAnalysisPipeline(rawEmail) {
 
   custody.addEntry('ANALYSIS_FINALISED', 'AnalysisEngine', `Risk: ${riskScore}/100, Verdict: ${verdict}`);
 
-  const summary = await generateGeminiSummary({ verdict, riskScore, confidence, headerResult, scoredUrls, indicators: allIndicators, parsed, fallbackSummary: `Email "${parsed.subject}" — Risk score: ${riskScore}/100 (${verdict})`, attachmentResults, ipReputations });
+  const summary = await generateAISummary({ verdict, riskScore, confidence, headerResult, scoredUrls, indicators: allIndicators, parsed, fallbackSummary: `Email "${parsed.subject}" — Risk score: ${riskScore}/100 (${verdict})`, attachmentResults, ipReputations });
 
   const analysisTimeMs = Date.now() - startTime;
 

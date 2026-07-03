@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Textarea } from './ui/textarea';
 
 interface EmailSubmissionProps {
-  onSubmit: (data: { type: string; content: string | File }) => void;
-  isProcessing: boolean;
+  onSubmit:        (data: { type: string; content: string | File }) => void;
+  isProcessing:    boolean;
+  trialRemaining?: number; // undefined = logged in (no counter shown)
 }
 
 interface SmtpStatus {
@@ -39,7 +40,7 @@ const verdictColors: Record<string, string> = {
   clean:      'text-emerald-400 bg-emerald-950/50 border-emerald-700/50',
 };
 
-export function EmailSubmission({ onSubmit, isProcessing }: EmailSubmissionProps) {
+export function EmailSubmission({ onSubmit, isProcessing, trialRemaining }: EmailSubmissionProps) {
   const [activeTab, setActiveTab]     = useState('upload');
   const [rawHeaders, setRawHeaders]   = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -119,9 +120,11 @@ export function EmailSubmission({ onSubmit, isProcessing }: EmailSubmissionProps
     }
   };
 
+  const trialExhausted = trialRemaining !== undefined && trialRemaining <= 0;
   const canSubmit =
-    (activeTab === 'upload' && selectedFile) ||
-    (activeTab === 'paste' && rawHeaders.trim().length > 20);
+    !trialExhausted &&
+    ((activeTab === 'upload' && selectedFile) ||
+    (activeTab === 'paste' && rawHeaders.trim().length > 20));
 
   const copyAddress = () => {
     navigator.clipboard.writeText(smtpStatus.emailAddress);
@@ -132,7 +135,22 @@ export function EmailSubmission({ onSubmit, isProcessing }: EmailSubmissionProps
   return (
     <Card className="bg-slate-900 border-slate-800 p-6">
       <div className="mb-5">
-        <h2 className="text-xl font-semibold text-white mb-1">Email Submission</h2>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-xl font-semibold text-white">Email Submission</h2>
+          {trialRemaining !== undefined && (
+            <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${
+              trialRemaining === 0
+                ? 'bg-red-950/40 text-red-400 border-red-700/50'
+                : trialRemaining === 1
+                  ? 'bg-amber-950/40 text-amber-400 border-amber-700/50'
+                  : 'bg-slate-800 text-slate-400 border-slate-700'
+            }`}>
+              {trialRemaining === 0
+                ? 'Trial limit reached — login to continue'
+                : `${trialRemaining} free ${trialRemaining === 1 ? 'analysis' : 'analyses'} remaining`}
+            </span>
+          )}
+        </div>
         <p className="text-sm text-slate-400">
           Choose how you want to submit a suspicious email for forensic analysis
         </p>

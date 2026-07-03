@@ -17,7 +17,8 @@ interface HistoryItem {
 
 interface AnalysisHistoryProps {
   onSelectAnalysis: (id: string) => void;
-  refreshTrigger?: number;
+  refreshTrigger?:  number;
+  userRole?:        string;
 }
 
 export function AnalysisHistory({ onSelectAnalysis, refreshTrigger }: AnalysisHistoryProps) {
@@ -31,7 +32,8 @@ export function AnalysisHistory({ onSelectAnalysis, refreshTrigger }: AnalysisHi
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/history?limit=50');
+      const res = await fetch('/api/history?limit=50', { credentials: 'include' });
+      if (res.status === 401 || res.status === 403) throw new Error('Login to view history');
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setHistoryData(data.analyses || []);

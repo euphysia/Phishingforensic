@@ -1,7 +1,11 @@
 import express from 'express';
 import supabase from '../db.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// All history endpoints require a logged-in user (analyst or admin; auditor uses /api/audit)
+router.use(requireAuth('analyst', 'admin'));
 
 /**
  * GET /api/history
@@ -15,11 +19,18 @@ router.get('/', async (req, res) => {
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    const { data: rows, error, count } = await supabase
+    let query = supabase
       .from('analyses')
-      .select('id, created_at, verdict, risk_score, confidence, severity, sha256, subject, sender, recipient, email_date, analysis_time_ms, summary', { count: 'exact' })
+      .select('id, created_at, verdict, risk_score, confidence, severity, sha256, subject, sender, recipient, email_date, analysis_time_ms, summary, submitted_by', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
+
+    // Analyst sees only their own submissions; Admin sees everything
+    if (req.user.role === 'analyst') {
+      query = query.eq('submitted_by', req.user.id);
+    }
+
+    const { data: rows, error, count } = await query;
 
     if (error) throw new Error(error.message);
 
@@ -28,6 +39,7 @@ router.get('/', async (req, res) => {
       createdAt: row.created_at,
       verdict: row.verdict,
       riskScore: row.risk_score,
+      submittedBy: row.submitted_by ?? null,
       confidence: row.confidence,
       severity: row.severity,
       sha256: row.sha256,

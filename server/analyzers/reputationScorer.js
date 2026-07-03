@@ -22,7 +22,7 @@
  * @param {object} phishTankResult - PhishTank result (Sprint 4)
  * @returns {{ score: number, status: 'malicious'|'suspicious'|'safe', category: string }}
  */
-export function scoreUrl(vtResult, urlScanResult, extractedUrl, phishingFlags = [], phishTankResult = null) {
+export function scoreUrl(vtResult, urlScanResult, extractedUrl, phishingFlags = [], phishTankResult = null, domainAgeResult = null) {
   let score = 100; // Start clean
   const categories = [];
 
@@ -73,6 +73,15 @@ export function scoreUrl(vtResult, urlScanResult, extractedUrl, phishingFlags = 
     if (!categories.includes(flag.type)) categories.push(flag.type);
   }
 
+  // ── Domain age penalties ──────────────────────────────────────────────────
+  if (domainAgeResult?.ageRisk === 'high') {
+    score -= 15;
+    categories.push('Newly Registered Domain (<30 days)');
+  } else if (domainAgeResult?.ageRisk === 'medium') {
+    score -= 8;
+    categories.push('Recently Registered Domain (<90 days)');
+  }
+
   // ── Structural penalties ──────────────────────────────────────────────────
   if (extractedUrl?.isIpBased) score -= 15;
   if (extractedUrl?.isShortener) score -= 8;
@@ -107,75 +116,75 @@ export function computeEmailRiskScore(
   headerResult,
   urlResults,
   allIndicators,
-  ipReputations   = [],
-  attachmentResults = []
+  ipReputations     = [],
+  attachmentResults = [],
+  bodyAnalysis      = null
 ) {
   const breakdown = {};
 
-  // ── Header score (25% weight) ─────────────────────────────────────────────
+  // ── Header (always present, base weight 0.30) ─────────────────────────────
   const headerRisk = 100 - (headerResult?.senderReputation ?? 100);
-  breakdown.header = { risk: headerRisk, weight: 0.25 };
+  breakdown.header = { risk: headerRisk, weight: 0.30 };
 
-  // ── URL score (30% weight) ────────────────────────────────────────────────
-  let urlRisk = 0;
+  // ── URL score — only included when email actually has URLs ────────────────
   if (urlResults.length > 0) {
     const worstScore = Math.min(...urlResults.map(u => u.score ?? 100));
-    urlRisk = 100 - worstScore;
+    breakdown.url = { risk: 100 - worstScore, weight: 0.30 };
   }
-  breakdown.url = { risk: urlRisk, weight: 0.30 };
 
-  // ── AbuseIPDB score (15% weight) — Sprint 4 ──────────────────────────────
-  let ipRisk = 0;
+  // ── AbuseIPDB — only included when sender IPs were found ─────────────────
   if (ipReputations.length > 0) {
-    const worstScore = Math.max(...ipReputations.map(r => r.abuseScore ?? 0));
-    ipRisk = worstScore; // AbuseIPDB score is already 0-100% abuse confidence
+    let ipRisk = Math.max(...ipReputations.map(r => r.abuseScore ?? 0));
     if (ipReputations.some(r => r.isTor)) ipRisk = Math.min(100, ipRisk + 30);
+    breakdown.ipReputation = { risk: ipRisk, weight: 0.15 };
   }
-  breakdown.ipReputation = { risk: ipRisk, weight: 0.15 };
 
-  // ── Attachment score (10% weight) — Sprint 3 ─────────────────────────────
-  let attachmentRisk = 0;
+  // ── Attachments — only included when email has attachments ───────────────
   if (attachmentResults.length > 0) {
     const statusScores = { safe: 0, suspicious: 50, malicious: 100 };
-    const worstAtt = Math.max(...attachmentResults.map(a => statusScores[a.status] ?? 0));
-    attachmentRisk = worstAtt;
-    // If VT detections on a file — escalate
-    const hasVtDetections = attachmentResults.some(a => a.vtResult?.detections > 0);
-    if (hasVtDetections) attachmentRisk = Math.min(100, attachmentRisk + 20);
+    let attachmentRisk = Math.max(...attachmentResults.map(a => statusScores[a.status] ?? 0));
+    if (attachmentResults.some(a => a.vtResult?.detections > 0)) {
+      attachmentRisk = Math.min(100, attachmentRisk + 20);
+    }
+    breakdown.attachments = { risk: attachmentRisk, weight: 0.10 };
   }
-  breakdown.attachments = { risk: attachmentRisk, weight: 0.10 };
 
-  // ── Indicator score (20% weight) ─────────────────────────────────────────
-  const highCount     = allIndicators.filter(i => i.severity === 'high').length;
-  const medCount      = allIndicators.filter(i => i.severity === 'medium').length;
-  const indicatorRisk = Math.min(100, highCount * 20 + medCount * 10);
+  // ── Body analysis — direct AI score (most accurate signal for body-only threats)
+  // bodyRiskScore from Groq is used directly so the qualitative summary and the
+  // numeric score always agree. Body tactics in allIndicators are kept for display
+  // but excluded from indicator scoring here to avoid double-counting.
+  if (bodyAnalysis?.bodyRiskScore > 0) {
+    breakdown.body = { risk: bodyAnalysis.bodyRiskScore, weight: 0.25 };
+  }
+
+  // ── Indicator score — hard indicators only (body-ai source excluded) ──────
+  // Body-sourced tactics are already represented by bodyRiskScore above.
+  const hardInds      = allIndicators.filter(i => i.source !== 'body-ai');
+  const indicatorRisk = Math.min(100,
+    hardInds.filter(i => i.severity === 'high').length   * 20 +
+    hardInds.filter(i => i.severity === 'medium').length * 10
+  );
   breakdown.indicators = { risk: indicatorRisk, weight: 0.20 };
 
-  // ── Weighted sum ──────────────────────────────────────────────────────────
-  const totalRisk = Object.values(breakdown).reduce(
-    (sum, { risk, weight }) => sum + risk * weight,
-    0
+  // ── Normalize weights across only active sources, then compute score ──────
+  const entries     = Object.values(breakdown);
+  const totalWeight = entries.reduce((s, e) => s + e.weight, 0);
+  const riskScore   = Math.round(
+    Math.min(100, entries.reduce((sum, e) => sum + e.risk * (e.weight / totalWeight), 0))
   );
 
-  const riskScore = Math.round(Math.min(100, totalRisk));
-
-  // ── Confidence: more signals = higher confidence ──────────────────────────
-  const signalCount =
-    (urlResults.length > 0        ? 1 : 0) +
-    (allIndicators.length > 0     ? 1 : 0) +
-    (ipReputations.length > 0     ? 1 : 0) +
-    (attachmentResults.length > 0 ? 1 : 0) +
-    1; // header always present
-  const confidence = Math.min(98, 60 + signalCount * 8);
+  // ── Confidence: more active signal sources = higher confidence ────────────
+  const signalCount = Object.keys(breakdown).length; // only counts active sources
+  const confidence = Math.min(98, 55 + signalCount * 9);
 
   // ── Verdict & severity ────────────────────────────────────────────────────
   let verdict, severity;
-  if (riskScore >= 75) {
+  if (riskScore >= 70) {
     verdict  = 'phishing';
-    severity = riskScore >= 90 ? 'critical' : 'high';
-  } else if (riskScore >= 45) {
+    severity = riskScore >= 88 ? 'critical' : 'high';
+  } else if (riskScore >= 30) {
     verdict  = 'suspicious';
-    severity = 'medium';
+    severity = riskScore >= 55 ? 'medium' : 'low';
   } else {
     verdict  = 'clean';
     severity = 'low';
