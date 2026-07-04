@@ -1,0 +1,24 @@
+From: "Priya Nair" <priya.nair@gmail.com>
+To: hannah@example.com
+Subject: Lunch this Friday?
+Date: Mon, 04 May 2026 10:05:00 -0800
+Message-ID: <benign001.test@gmail.com>
+Reply-To: priya.nair@gmail.com
+Return-Path: <priya.nair@gmail.com>
+MIME-Version: 1.0
+Authentication-Results: mx.example.com;
+  spf=pass smtp.mailfrom=priya.nair@gmail.com;
+  dkim=pass;
+  dmarc=pass (p=none)
+Received: from mail-gmail.google.com (209.85.220.41) by mx.example.com
+  with SMTP id def456; Mon, 04 May 2026 10:05:12 -0800
+Content-Type: text/plain; charset=UTF-8
+
+Hey Hannah,
+
+Are you free for lunch this Friday around 1pm? Thinking of trying the
+new noodle place near campus.
+
+Let me know!
+
+Priya

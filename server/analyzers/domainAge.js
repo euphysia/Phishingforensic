@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-const whoiser = createRequire(import.meta.url)('whoiser');
+const { whoisDomain } = createRequire(import.meta.url)('whoiser');
 
 const CACHE = new Map();
 
@@ -33,7 +33,7 @@ export async function checkDomainAge(domain) {
 }
 
 async function lookupWhois(domain) {
-  const data = await whoiser(domain, { follow: 1 });
+  const data = await whoisDomain(domain, { follow: 1 });
 
   // whoiser returns an object keyed by whois server; find the first with a creation date
   let registeredAt = null;

@@ -2,7 +2,7 @@
  * Extracts URLs from email body (HTML and plain text) and defangs them.
  */
 
-const URL_REGEX = /https?:\/\/(?:[-\w]+\.)+[-\w]{2,}(?:\/[^\s<>"']*)?/gi;
+const URL_REGEX = /https?:\/\/(?:[-\w]+\.)+[-\w]{2,}(?:\/[^\s<>"'\[\]]*)?/gi;
 
 // URL shorteners to flag
 const URL_SHORTENERS = [

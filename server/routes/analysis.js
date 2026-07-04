@@ -104,24 +104,35 @@ router.post('/', optionalAuth, checkGuestLimit, async (req, res) => {
           submitted_by:     req.user?.id ?? null,
         });
 
-        // Clone related rows under the new ID
+        // Clone related rows under the new ID.
+        // Note: spreading `id: undefined` still sends an explicit SQL NULL for `id` via
+        // supabase-js (unlike plain JSON.stringify, which would drop the key) — since these
+        // tables have no default id generator, that violates the NOT NULL constraint and
+        // silently fails the clone. Destructuring `id` out of the row avoids sending it at all.
+        const withoutId = ({ id, ...rest }) => rest;
         if (headersRow) {
-          await supabase.from('email_headers').insert({ ...headersRow, id: undefined, analysis_id: newId });
+          const { error } = await supabase.from('email_headers').insert({ ...withoutId(headersRow), analysis_id: newId });
+          if (error) console.warn('[Analysis] Cache clone (email_headers) failed:', error.message);
         }
         if ((urls ?? []).length > 0) {
-          await supabase.from('url_results').insert(urls.map(r => ({ ...r, id: undefined, analysis_id: newId })));
+          const { error } = await supabase.from('url_results').insert(urls.map(r => ({ ...withoutId(r), analysis_id: newId })));
+          if (error) console.warn('[Analysis] Cache clone (url_results) failed:', error.message);
         }
         if ((attachments ?? []).length > 0) {
-          try { await supabase.from('attachments').insert(attachments.map(r => ({ ...r, id: undefined, analysis_id: newId }))); } catch {}
+          const { error } = await supabase.from('attachments').insert(attachments.map(r => ({ ...withoutId(r), analysis_id: newId })));
+          if (error) console.warn('[Analysis] Cache clone (attachments) failed:', error.message);
         }
         if ((indicators ?? []).length > 0) {
-          await supabase.from('phishing_indicators').insert(indicators.map(r => ({ ...r, id: undefined, analysis_id: newId })));
+          const { error } = await supabase.from('phishing_indicators').insert(indicators.map(r => ({ ...withoutId(r), analysis_id: newId })));
+          if (error) console.warn('[Analysis] Cache clone (phishing_indicators) failed:', error.message);
         }
         if ((ipReps ?? []).length > 0) {
-          try { await supabase.from('ip_reputations').insert(ipReps.map(r => ({ ...r, id: undefined, analysis_id: newId }))); } catch {}
+          const { error } = await supabase.from('ip_reputations').insert(ipReps.map(r => ({ ...withoutId(r), analysis_id: newId })));
+          if (error) console.warn('[Analysis] Cache clone (ip_reputations) failed:', error.message);
         }
         if (custodyRows?.[0]) {
-          await supabase.from('chain_of_custody').insert({ ...custodyRows[0], id: undefined, analysis_id: newId });
+          const { error } = await supabase.from('chain_of_custody').insert({ ...withoutId(custodyRows[0]), analysis_id: newId });
+          if (error) console.warn('[Analysis] Cache clone (chain_of_custody) failed:', error.message);
         }
 
         const urlList = urls  || [];
