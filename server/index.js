@@ -174,7 +174,10 @@ async function runAnalysisPipeline(rawEmail) {
   await supabase.from('analyses').insert({ id: analysisId, verdict, risk_score: riskScore, confidence, severity, sha256: parsed.sha256, subject: parsed.subject, sender: parsed.from, recipient: parsed.to, email_date: parsed.date, analysis_time_ms: analysisTimeMs, summary });
   await supabase.from('email_headers').insert({ analysis_id: analysisId, spf_status: headerResult.spfStatus, dkim_status: headerResult.dkimStatus, dmarc_status: headerResult.dmarcStatus, sender_reputation: headerResult.senderReputation, return_path: headerResult.returnPath, received_from: headerResult.receivedFrom, message_id: parsed.messageId, reply_to: parsed.replyTo, spoofing_indicators: headerResult.spoofingIndicators });
   if (scoredUrls.length > 0) await supabase.from('url_results').insert(scoredUrls.map(u => ({ analysis_id: analysisId, url: u.url, defanged_url: u.defangedUrl, status: u.status, reputation: u.score, category: u.category, vt_detections: u.vtDetections, vt_total: u.vtTotal, urlscan_verdict: u.urlScanVerdict, urlscan_uuid: u.urlScanUuid, phishing_flags: u.phishingFlags })));
-  if (attachmentResults.length > 0) await supabase.from('attachments').insert(attachmentResults.map(a => ({ analysis_id: analysisId, filename: a.filename, content_type: a.contentType, size_bytes: a.sizeBytes, sha256: a.sha256, status: a.status, sandbox_result: `Static analysis — ${a.risks?.length || 0} risk(s) found` }))).catch(() => {});
+  if (attachmentResults.length > 0) {
+    const { error: attErr } = await supabase.from('attachments').insert(attachmentResults.map(a => ({ analysis_id: analysisId, filename: a.filename, content_type: a.contentType, size_bytes: a.sizeBytes, sha256: a.sha256, status: a.status, sandbox_result: `Static analysis — ${a.risks?.length || 0} risk(s) found` })));
+    if (attErr) console.warn('[SMTP Pipeline] Attachment insert warning:', attErr.message);
+  }
   if (allIndicators.length > 0) await supabase.from('phishing_indicators').insert(allIndicators.map(ind => ({ analysis_id: analysisId, type: ind.type, description: ind.description, severity: ind.severity })));
 
   return { id: analysisId, verdict, riskScore, confidence, severity, summary, scoreBreakdown };

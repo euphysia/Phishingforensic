@@ -9,6 +9,8 @@ interface EmailSubmissionProps {
   onSubmit:        (data: { type: string; content: string | File }) => void;
   isProcessing:    boolean;
   trialRemaining?: number; // undefined = logged in (no counter shown)
+  onViewAnalysis?: (id: string) => void;
+  isLoggedIn?:     boolean;
 }
 
 interface SmtpStatus {
@@ -40,7 +42,7 @@ const verdictColors: Record<string, string> = {
   clean:      'text-emerald-400 bg-emerald-950/50 border-emerald-700/50',
 };
 
-export function EmailSubmission({ onSubmit, isProcessing, trialRemaining }: EmailSubmissionProps) {
+export function EmailSubmission({ onSubmit, isProcessing, trialRemaining, onViewAnalysis, isLoggedIn }: EmailSubmissionProps) {
   const [activeTab, setActiveTab]     = useState('upload');
   const [rawHeaders, setRawHeaders]   = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -396,13 +398,6 @@ export function EmailSubmission({ onSubmit, isProcessing, trialRemaining }: Emai
                   ]}
                 />
               </div>
-              <div className="mt-4 p-3 rounded-lg bg-amber-950/30 border border-amber-800/40 text-xs text-amber-300 flex gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Demo tip:</strong> For FYP demos, the easiest method is the <strong>Upload tab</strong> — download the email as .eml
-                  from Gmail/Outlook and upload directly. No SMTP setup needed.
-                </span>
-              </div>
             </div>
           </div>
 
@@ -418,7 +413,7 @@ export function EmailSubmission({ onSubmit, isProcessing, trialRemaining }: Emai
               </div>
               <div className="divide-y divide-slate-800">
                 {smtpStatus.recentForwards!.map((entry) => (
-                  <ForwardFeedEntry key={entry.id} entry={entry} />
+                  <ForwardFeedEntry key={entry.id} entry={entry} onViewAnalysis={onViewAnalysis} isLoggedIn={isLoggedIn} />
                 ))}
               </div>
             </div>
@@ -536,7 +531,7 @@ function ClientGuide({ name, steps }: { name: string; steps: string[] }) {
   );
 }
 
-function ForwardFeedEntry({ entry }: { entry: ForwardEntry }) {
+function ForwardFeedEntry({ entry, onViewAnalysis, isLoggedIn }: { entry: ForwardEntry; onViewAnalysis?: (id: string) => void; isLoggedIn?: boolean }) {
   const timeAgo = (iso: string) => {
     const diff = Date.now() - new Date(iso).getTime();
     if (diff < 60000) return `${Math.round(diff / 1000)}s ago`;
@@ -544,8 +539,17 @@ function ForwardFeedEntry({ entry }: { entry: ForwardEntry }) {
     return new Date(iso).toLocaleTimeString();
   };
 
+  const hasResult = entry.status === 'complete' && !!entry.analysisId && !!onViewAnalysis;
+  const canOpen    = hasResult && isLoggedIn;
+
   return (
-    <div className="flex items-center gap-4 px-5 py-3 hover:bg-slate-800/30 transition-colors">
+    <div
+      role={hasResult ? 'button' : undefined}
+      tabIndex={hasResult ? 0 : undefined}
+      onClick={() => { if (hasResult) onViewAnalysis!(entry.analysisId!); }}
+      onKeyDown={(e) => { if (hasResult && (e.key === 'Enter' || e.key === ' ')) onViewAnalysis!(entry.analysisId!); }}
+      className={`flex items-center gap-4 px-5 py-3 transition-colors ${hasResult ? 'hover:bg-slate-800/30 cursor-pointer' : ''}`}
+    >
       <div className="shrink-0">
         {entry.status === 'processing' && <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />}
         {entry.status === 'complete'   && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
@@ -568,15 +572,13 @@ function ForwardFeedEntry({ entry }: { entry: ForwardEntry }) {
           <span className="text-xs text-red-400 truncate max-w-[120px]" title={entry.error ?? ''}>Error</span>
         )}
         <span className="text-xs text-slate-600 whitespace-nowrap">{timeAgo(entry.receivedAt)}</span>
-        {entry.analysisId && (
-          <a
-            href="#"
-            onClick={(e) => { e.preventDefault(); }}
-            className="text-slate-500 hover:text-blue-400 transition-colors"
-            title="View analysis"
+        {hasResult && (
+          <span
+            className={canOpen ? 'text-slate-500 hover:text-blue-400 transition-colors' : 'text-slate-700'}
+            title={canOpen ? 'View analysis' : 'Sign in as analyst/admin to view full analysis details'}
           >
             <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          </span>
         )}
       </div>
     </div>

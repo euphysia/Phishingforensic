@@ -4,18 +4,6 @@ import { Button }  from './ui/button';
 import { Card }    from './ui/card';
 import { useAuth } from '../context/AuthContext';
 
-const ROLE_COLORS: Record<string, string> = {
-  admin:   'bg-purple-600/20 text-purple-300 border-purple-500/40',
-  analyst: 'bg-blue-600/20 text-blue-300 border-blue-500/40',
-  auditor: 'bg-amber-600/20 text-amber-300 border-amber-500/40',
-};
-
-const DEMO_ACCOUNTS = [
-  { email: 'admin@phishscan.com',   password: 'Admin123!',   role: 'admin'   },
-  { email: 'analyst@phishscan.com', password: 'Analyst123!', role: 'analyst' },
-  { email: 'auditor@phishscan.com', password: 'Auditor123!', role: 'auditor' },
-];
-
 interface LoginPageProps {
   onSuccess: () => void;
   onContinueAsGuest?: () => void;
@@ -41,12 +29,6 @@ export function LoginPage({ onSuccess, onContinueAsGuest }: LoginPageProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const fillDemo = (email: string, password: string) => {
-    setEmail(email);
-    setPassword(password);
-    setError(null);
   };
 
   return (
@@ -132,28 +114,6 @@ export function LoginPage({ onSuccess, onContinueAsGuest }: LoginPageProps) {
               )}
             </Button>
           </form>
-
-          {/* Demo accounts */}
-          <div className="mt-6">
-            <p className="text-xs text-slate-500 uppercase tracking-wide font-medium mb-3">Demo accounts</p>
-            <div className="space-y-2">
-              {DEMO_ACCOUNTS.map(acc => (
-                <button
-                  key={acc.role}
-                  onClick={() => fillDemo(acc.email, acc.password)}
-                  className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700/50 hover:border-slate-600 transition-colors text-left"
-                >
-                  <div>
-                    <p className="text-sm text-slate-300 font-medium">{acc.email}</p>
-                    <p className="text-xs text-slate-500 font-mono">{acc.password}</p>
-                  </div>
-                  <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold uppercase ${ROLE_COLORS[acc.role]}`}>
-                    {acc.role}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
 
           {/* Guest option */}
           {onContinueAsGuest && (

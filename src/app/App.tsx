@@ -199,8 +199,19 @@ function AppInner() {
         const data = await res.json();
         setAnalysisData(data);
         setShowResults(true);
+        setAnalysisError(null);
+      } else if (res.status === 401) {
+        setShowResults(false);
+        setAnalysisError('Sign in as an analyst or admin to view full analysis details.');
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setShowResults(false);
+        setAnalysisError(errData.error || `Could not load analysis (HTTP ${res.status})`);
       }
-    } catch {}
+    } catch (err: any) {
+      setShowResults(false);
+      setAnalysisError(err.message || 'Could not load analysis');
+    }
   };
 
   const handleLogout = async () => {
@@ -389,6 +400,8 @@ function AppInner() {
                 onSubmit={handleSubmit}
                 isProcessing={isProcessing}
                 trialRemaining={!isLoggedIn ? trial.remaining : undefined}
+                onViewAnalysis={handleSelectAnalysis}
+                isLoggedIn={isLoggedIn}
               />
 
               <ProcessingStatus

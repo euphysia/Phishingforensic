@@ -6,8 +6,8 @@ import { Button } from './ui/button';
 interface AuditEntry {
   timestamp: string;
   action:    string;
-  module:    string;
-  description: string;
+  component: string;
+  detail:    string;
 }
 
 interface AuditLog {
@@ -166,8 +166,8 @@ export function AuditorDashboard() {
                             {new Date(e.timestamp).toLocaleString('en-GB')}
                           </td>
                           <td className="px-3 py-2 border border-slate-800 font-semibold text-white">{e.action}</td>
-                          <td className="px-3 py-2 border border-slate-800 text-slate-400">{e.module}</td>
-                          <td className="px-3 py-2 border border-slate-800 text-slate-300">{e.description}</td>
+                          <td className="px-3 py-2 border border-slate-800 text-slate-400">{e.component}</td>
+                          <td className="px-3 py-2 border border-slate-800 text-slate-300">{e.detail}</td>
                         </tr>
                       ))}
                     </tbody>

