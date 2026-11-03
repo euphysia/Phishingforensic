@@ -1,5 +1,12 @@
-import { createRequire } from 'module';
-const { whoisDomain } = createRequire(import.meta.url)('whoiser');
+// whoiser is ESM-only. Load it lazily with a dynamic import() so this module
+// works both under plain Node (ESM) and inside the Netlify Function bundle,
+// which esbuild emits as CommonJS (where import.meta.url would be empty).
+let whoiserPromise;
+async function whoisDomain(...args) {
+  whoiserPromise ??= import('whoiser');
+  const mod = await whoiserPromise;
+  return mod.whoisDomain(...args);
+}
 
 const CACHE = new Map();
 

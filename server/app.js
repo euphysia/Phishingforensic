@@ -1,4 +1,5 @@
 import express      from 'express';
+import { hasApiKey } from './utils/apiKeys.js';
 import cors         from 'cors';
 import multer       from 'multer';
 import cookieParser from 'cookie-parser';
@@ -62,11 +63,11 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     demoMode: {
-      virusTotal:  !process.env.VIRUSTOTAL_API_KEY || process.env.VIRUSTOTAL_API_KEY === 'YOUR_VIRUSTOTAL_API_KEY',
-      urlScan:     !process.env.URLSCAN_API_KEY    || process.env.URLSCAN_API_KEY    === 'YOUR_URLSCAN_API_KEY',
+      virusTotal:  !hasApiKey('VIRUSTOTAL_API_KEY'),
+      urlScan:     !hasApiKey('URLSCAN_API_KEY'),
       gemini:      !process.env.GEMINI_API_KEY     || process.env.GEMINI_API_KEY     === 'your-gemini-api-key-here',
-      abuseIpDb:   !process.env.ABUSEIPDB_API_KEY  || process.env.ABUSEIPDB_API_KEY  === 'YOUR_ABUSEIPDB_API_KEY',
-      phishTank:   !process.env.PHISHTANK_API_KEY  || process.env.PHISHTANK_API_KEY  === 'YOUR_PHISHTANK_API_KEY',
+      abuseIpDb:   !hasApiKey('ABUSEIPDB_API_KEY'),
+      phishTank:   !hasApiKey('PHISHTANK_API_KEY'),
     },
     smtp: { port: smtpPort, available: !IS_SERVERLESS },
     runtime: IS_SERVERLESS ? 'netlify-functions' : 'node',

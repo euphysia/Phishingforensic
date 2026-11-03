@@ -6,6 +6,7 @@
  * - Graceful fallback to demo data when API key missing
  */
 
+import { hasApiKey } from '../utils/apiKeys.js';
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
 
@@ -62,7 +63,7 @@ export async function checkIpReputation(ip) {
 
   const apiKey = process.env.ABUSEIPDB_API_KEY;
 
-  if (!apiKey || apiKey === 'YOUR_ABUSEIPDB_API_KEY') {
+  if (!hasApiKey('ABUSEIPDB_API_KEY')) {
     return generateDemoAbuseIPDBResult(ip);
   }
 
