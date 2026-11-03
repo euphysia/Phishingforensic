@@ -1,3 +1,4 @@
+import { hasApiKey } from '../utils/apiKeys.js';
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
 import { IS_SERVERLESS } from '../runtime.js';
@@ -18,7 +19,7 @@ export async function scanWithVirusTotal(url) {
   const apiKey = process.env.VIRUSTOTAL_API_KEY;
 
   // Demo mode — no API key
-  if (!apiKey || apiKey === 'YOUR_VIRUSTOTAL_API_KEY') {
+  if (!hasApiKey('VIRUSTOTAL_API_KEY')) {
     return generateDemoVTResult(url);
   }
 

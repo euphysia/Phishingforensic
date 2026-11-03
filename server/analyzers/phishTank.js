@@ -7,6 +7,7 @@
  * - Caching: 24h TTL (phishing URLs don't become safe quickly)
  */
 
+import { hasApiKey } from '../utils/apiKeys.js';
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
 
@@ -32,7 +33,7 @@ export async function checkWithPhishTank(url) {
 
   const apiKey = process.env.PHISHTANK_API_KEY;
 
-  if (!apiKey || apiKey === 'YOUR_PHISHTANK_API_KEY') {
+  if (!hasApiKey('PHISHTANK_API_KEY')) {
     return generateDemoPhishTankResult(url);
   }
 

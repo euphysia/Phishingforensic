@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import app from './app.js';
+import { hasApiKey } from './utils/apiKeys.js';
 import { startSmtpListener } from './smtp/smtpListener.js';
 
 // ── Import analysis pipeline for SMTP-triggered runs ─────────────────────────
@@ -25,11 +26,11 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`\n🔬 Phishing Forensic API running at http://localhost:${PORT}`);
   console.log(`   Health:      http://localhost:${PORT}/api/health`);
-  console.log(`   VirusTotal:  ${process.env.VIRUSTOTAL_API_KEY ? '✅ API key set' : '⚠️  Demo mode'}`);
-  console.log(`   URLScan:     ${process.env.URLSCAN_API_KEY    ? '✅ API key set' : '⚠️  Demo mode'}`);
+  console.log(`   VirusTotal:  ${hasApiKey('VIRUSTOTAL_API_KEY') ? '✅ API key set' : '⚠️  Demo mode'}`);
+  console.log(`   URLScan:     ${hasApiKey('URLSCAN_API_KEY')    ? '✅ API key set' : '⚠️  Demo mode'}`);
   console.log(`   Gemini AI:   ${process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your-gemini-api-key-here' ? '✅ API key set' : '⚠️  Fallback summaries'}`);
-  console.log(`   AbuseIPDB:   ${process.env.ABUSEIPDB_API_KEY && process.env.ABUSEIPDB_API_KEY !== 'YOUR_ABUSEIPDB_API_KEY' ? '✅ API key set' : '⚠️  Demo mode'}`);
-  console.log(`   PhishTank:   ${process.env.PHISHTANK_API_KEY && process.env.PHISHTANK_API_KEY !== 'YOUR_PHISHTANK_API_KEY' ? '✅ API key set' : '⚠️  Demo mode'}\n`);
+  console.log(`   AbuseIPDB:   ${hasApiKey('ABUSEIPDB_API_KEY') ? '✅ API key set' : '⚠️  Demo mode'}`);
+  console.log(`   PhishTank:   ${hasApiKey('PHISHTANK_API_KEY') ? '✅ API key set' : '⚠️  Demo mode'}\n`);
 
   // Start SMTP inbound listener
   startSmtpListener(runAnalysisPipeline);

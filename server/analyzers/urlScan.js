@@ -1,3 +1,4 @@
+import { hasApiKey } from '../utils/apiKeys.js';
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
 import { IS_SERVERLESS } from '../runtime.js';
@@ -17,7 +18,7 @@ export async function scanWithURLScan(url) {
 
   const apiKey = process.env.URLSCAN_API_KEY;
 
-  if (!apiKey || apiKey === 'YOUR_URLSCAN_API_KEY') {
+  if (!hasApiKey('URLSCAN_API_KEY')) {
     return generateDemoURLScanResult(url);
   }
 
