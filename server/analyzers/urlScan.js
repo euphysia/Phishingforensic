@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
+import { IS_SERVERLESS } from '../runtime.js';
 
 const URLSCAN_BASE = 'https://urlscan.io/api/v1';
 
@@ -48,7 +49,7 @@ export async function scanWithURLScan(url) {
   }
 }
 
-async function pollURLScan(uuid, url, maxAttempts = 10) {
+async function pollURLScan(uuid, url, maxAttempts = IS_SERVERLESS ? 3 : 10) {
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(6000);
     try {

@@ -1,0 +1,28 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # These variables hold non-sensitive configuration (ports, a local SMTP
+  # domain, and the public Supabase project URL) whose values legitimately
+  # appear in the UI and repo docs. Real secrets (API keys, service keys)
+  # are still scanned.
+  SECRETS_SCAN_OMIT_KEYS = "PORT,SMTP_PORT,SMTP_DOMAIN,SUPABASE_URL"
+
+[functions]
+  node_bundler = "esbuild"
+  # whoiser is loaded via createRequire, keep it (and the SMTP lib) out of the bundle
+  external_node_modules = ["whoiser", "smtp-server", "mailparser"]
+
+# Route the frontend's /api/* calls to the Express API function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+  force = true
+
+# Single-page app fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

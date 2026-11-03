@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getCached, setCached } from '../cache/urlCache.js';
+import { IS_SERVERLESS } from '../runtime.js';
 
 const VT_BASE = 'https://www.virustotal.com/api/v3';
 
@@ -49,7 +50,7 @@ export async function scanWithVirusTotal(url) {
   }
 }
 
-async function pollVTAnalysis(analysisId, apiKey, maxAttempts = 6) {
+async function pollVTAnalysis(analysisId, apiKey, maxAttempts = IS_SERVERLESS ? 3 : 6) {
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(5000);
     try {
