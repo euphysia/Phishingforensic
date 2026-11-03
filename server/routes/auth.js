@@ -3,6 +3,7 @@ import bcrypt  from 'bcryptjs';
 import jwt     from 'jsonwebtoken';
 import supabase from '../db.js';
 import { JWT_SECRET, COOKIE_SECRET } from '../middleware/auth.js';
+import { IS_SERVERLESS } from '../runtime.js';
 
 const router = express.Router();
 
@@ -10,7 +11,7 @@ const TOKEN_COOKIE_OPTS = {
   httpOnly: true,
   sameSite: 'strict',
   maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days
-  secure:   process.env.NODE_ENV === 'production',
+  secure:   process.env.NODE_ENV === 'production' || IS_SERVERLESS,
 };
 
 // POST /api/auth/login

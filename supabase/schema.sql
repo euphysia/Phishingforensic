@@ -1,7 +1,7 @@
 -- ============================================================
 -- Phishing Forensic Analysis System — Supabase Schema
 -- Run this once in your Supabase SQL Editor
--- Project: https://uoaokggmtammsjkypjkz.supabase.co
+-- Project: <your Supabase project URL>
 -- ============================================================
 
 -- Enable UUID extension (usually already enabled in Supabase)

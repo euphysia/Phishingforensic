@@ -6,11 +6,17 @@
 
 import express from 'express';
 import { getSmtpStatus, smtpEvents } from '../smtp/smtpListener.js';
+import { IS_SERVERLESS } from '../runtime.js';
+
+const SERVERLESS_MSG = 'email forwarding needs the self-hosted backend (not available on the hosted site)';
 
 const router = express.Router();
 
 // ── GET /api/smtp/status ──────────────────────────────────────────────────────
 router.get('/status', (req, res) => {
+  if (IS_SERVERLESS) {
+    return res.json({ ...getSmtpStatus(), status: 'stopped', error: SERVERLESS_MSG, recentForwards: [] });
+  }
   res.json(getSmtpStatus());
 });
 
@@ -18,6 +24,10 @@ router.get('/status', (req, res) => {
 // Frontend listens on this to get real-time notifications when a forwarded
 // email has been analysed.
 router.get('/events', (req, res) => {
+  // Serverless functions can't hold a stream open; 204 tells EventSource
+  // to stop reconnecting.
+  if (IS_SERVERLESS) return res.status(204).end();
+
   res.setHeader('Content-Type',  'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection',    'keep-alive');

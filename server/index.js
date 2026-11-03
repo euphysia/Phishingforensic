@@ -1,15 +1,6 @@
 import 'dotenv/config';
-import express      from 'express';
-import cors         from 'cors';
-import multer       from 'multer';
-import cookieParser from 'cookie-parser';
-import analysisRouter from './routes/analysis.js';
-import historyRouter  from './routes/history.js';
-import smtpRouter     from './routes/smtp.js';
-import authRouter     from './routes/auth.js';
-import auditRouter    from './routes/audit.js';
+import app from './app.js';
 import { startSmtpListener } from './smtp/smtpListener.js';
-import { COOKIE_SECRET } from './middleware/auth.js';
 
 // ── Import analysis pipeline for SMTP-triggered runs ─────────────────────────
 import { parseEmail }                    from './parser/emailParser.js';
@@ -27,64 +18,7 @@ import { checkWithPhishTank }            from './analyzers/phishTank.js';
 import { v4 as uuid }                    from 'uuid';
 import supabase                          from './db.js';
 
-const app  = express();
 const PORT = process.env.PORT || 3001;
-
-// ── Middleware ────────────────────────────────────────────────────────────────
-
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'], credentials: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.text({ type: 'message/rfc822', limit: '10mb' }));
-app.use(cookieParser(COOKIE_SECRET));
-
-// Multer for .eml file uploads (memory storage)
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) => {
-    const allowed = ['.eml', '.txt', '.msg'];
-    const ext = file.originalname.toLowerCase().slice(file.originalname.lastIndexOf('.'));
-    if (allowed.includes(ext) || file.mimetype.includes('text')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only .eml, .txt, or .msg files are allowed'));
-    }
-  },
-});
-
-// ── Routes ────────────────────────────────────────────────────────────────────
-
-app.use('/api/auth',    authRouter);
-app.use('/api/analyze', upload.single('email'), analysisRouter);
-app.use('/api/history', historyRouter);
-app.use('/api/audit',   auditRouter);
-app.use('/api/smtp',    smtpRouter);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  const smtpPort = process.env.SMTP_PORT || 2525;
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    demoMode: {
-      virusTotal:  !process.env.VIRUSTOTAL_API_KEY || process.env.VIRUSTOTAL_API_KEY === 'YOUR_VIRUSTOTAL_API_KEY',
-      urlScan:     !process.env.URLSCAN_API_KEY    || process.env.URLSCAN_API_KEY    === 'YOUR_URLSCAN_API_KEY',
-      gemini:      !process.env.GEMINI_API_KEY     || process.env.GEMINI_API_KEY     === 'your-gemini-api-key-here',
-      abuseIpDb:   !process.env.ABUSEIPDB_API_KEY  || process.env.ABUSEIPDB_API_KEY  === 'YOUR_ABUSEIPDB_API_KEY',
-      phishTank:   !process.env.PHISHTANK_API_KEY  || process.env.PHISHTANK_API_KEY  === 'YOUR_PHISHTANK_API_KEY',
-    },
-    smtp: { port: smtpPort },
-  });
-});
-
-// ── Error handler ─────────────────────────────────────────────────────────────
-
-app.use((err, req, res, next) => {
-  console.error('[Server Error]', err.message);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
-  });
-});
 
 // ── Start HTTP server then SMTP listener ──────────────────────────────────────
 
